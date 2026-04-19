@@ -1,0 +1,47 @@
+{
+  "name": "Vigil Postop Sentinel",
+  "description": "Continuously monitors postop and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs, then drafts SBAR escalation notes for the clinical team.",
+  "version": "0.1.0",
+  "url": "http://localhost:9000/a2a",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.2",
+  "provider": {
+    "organization": "Team Vigil (Agents Assemble 2026)",
+    "url": "https://github.com/raymond/vigil"
+  },
+  "documentationUrl": "https://github.com/raymond/vigil/blob/main/docs/API_CONTRACTS.md",
+  "defaultInputModes": ["application/json", "text/plain"],
+  "defaultOutputModes": ["application/json", "text/plain"],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "skills": [
+    {
+      "id": "vigil.monitor_patient",
+      "name": "Monitor patient for deterioration",
+      "description": "End-to-end screen: pulls recent vitals and labs, runs MEWT + qSOFA + CDC ASE, and returns a structured alert with an SBAR note when any trigger fires.",
+      "tags": ["healthcare", "postop", "postpartum", "sepsis", "early-warning"],
+      "examples": [
+        "Check patient-42 for signs of deterioration in the last 4 hours.",
+        "Screen this postpartum patient for preeclampsia red flags and sepsis."
+      ],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["application/json", "text/plain"]
+    },
+    {
+      "id": "vigil.explain_alert",
+      "name": "Explain an existing alert",
+      "description": "Given a prior alert id, returns the evidence trail (which vitals, which criteria, which LLM rationale).",
+      "tags": ["healthcare", "explainability"],
+      "examples": ["Why did you escalate patient-42 at 12:01?"],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["application/json", "text/plain"]
+    }
+  ],
+  "securitySchemes": {
+    "apiKey": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+  },
+  "security": [{ "apiKey": [] }]
+}
