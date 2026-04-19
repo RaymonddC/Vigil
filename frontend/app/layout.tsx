@@ -36,6 +36,14 @@ export default function RootLayout({
       className={`${geist.variable} ${geistMono.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50 font-[family-name:var(--font-inter)]">
+        {/* Skip-to-content for keyboard navigation (WCAG 2.4.1) */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-[#0B5FFF] focus:text-white focus:rounded-md focus:text-sm focus:font-medium"
+        >
+          Skip to main content
+        </a>
+
         {/* ── Top bar ── */}
         <header className="sticky top-0 z-50 h-14 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center px-6 gap-4 shadow-[0_1px_0_0_#E2E8F0]">
           {/* Logo — left */}
