@@ -283,9 +283,11 @@ app = FastAPI(
 )
 
 app.add_middleware(SharpHeaderMiddleware)
+# SEC-06: CORS restricted to env-var origins. Default to localhost frontend in dev.
+# Before opening any tunnel, set CORS_ORIGINS to the deployed frontend origin(s).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
