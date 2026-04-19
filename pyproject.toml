@@ -21,6 +21,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
+    "pre-commit>=3.0",
 ]
 ollama = ["ollama>=0.4"]
 groq = ["groq>=0.12"]

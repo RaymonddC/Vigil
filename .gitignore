@@ -44,6 +44,11 @@ Thumbs.db
 # Logs
 *.log
 
+# Secrets / certs
+*.pem
+*.key
+*.p12
+
 # Data (keep structure, ignore generated)
 data/patients/*.json
 !data/patients/.gitkeep
