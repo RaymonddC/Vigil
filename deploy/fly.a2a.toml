@@ -1,0 +1,45 @@
+# Fly.io config — Vigil A2A Agent (vigil-a2a)
+# Deploy: fly deploy --config deploy/fly.a2a.toml --app vigil-a2a
+#
+# AgentCard served at: https://vigil-a2a.fly.dev/.well-known/agent-card.json
+# A2A JSON-RPC endpoint: https://vigil-a2a.fly.dev/a2a
+#
+# The agent calls the MCP server over Fly.io private networking:
+#   MCP_BASE_URL=http://vigil-mcp.internal:7001
+#
+# HAPI FHIR reached via private networking — NEVER publicly routed (SEC-10).
+
+app = "vigil-a2a"
+primary_region = "sin"
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  SERVICE            = "a2a"
+  A2A_PORT           = "9000"
+  MCP_BASE_URL       = "http://vigil-mcp.internal:7001"
+  FHIR_BASE_URL      = "http://vigil-hapi.internal:8080/fhir"
+  A2A_PUBLIC_URL     = "https://vigil-a2a.fly.dev"
+  POLL_INTERVAL_SEC  = "900"
+  LOG_LEVEL          = "INFO"
+
+# Secrets (set via: fly secrets set --app vigil-a2a KEY=value)
+# VIGIL_API_KEY  — same shared key as other services
+
+[[services]]
+  internal_port = 9000
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port     = 443
+    handlers = ["tls", "http"]
+  [[services.ports]]
+    port     = 80
+    handlers = ["http"]
+
+  [[services.http_checks]]
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "30s"
+    path         = "/.well-known/agent-card.json"

@@ -1,0 +1,37 @@
+# Fly.io config — HAPI FHIR (vigil-hapi) — INTERNAL ONLY
+# Deploy: fly deploy --config deploy/fly.hapi.toml --app vigil-hapi
+#
+# IMPORTANT: No [[services]] block — HAPI is NOT publicly routed.
+# Reachable only from other vigil-* apps via Fly.io private networking:
+#   http://vigil-hapi.internal:8080/fhir
+#
+# This satisfies SEC-10: HAPI audit events cannot be tampered from the internet.
+# The only client that writes to HAPI is the FastAPI proxy approve endpoint.
+#
+# Storage: uses Fly.io managed Postgres (create once with):
+#   fly postgres create --name vigil-hapi-db --region sin
+#   fly postgres attach vigil-hapi-db --app vigil-hapi
+
+app = "vigil-hapi"
+primary_region = "sin"
+
+[build]
+  image = "hapiproject/hapi:v7.2.0"
+
+[env]
+  "spring.datasource.driverClassName"                 = "org.postgresql.Driver"
+  "spring.jpa.properties.hibernate.dialect"           = "ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect"
+  "hapi.fhir.fhir_version"                            = "R4"
+  "hapi.fhir.allow_multiple_delete"                   = "true"
+  "hapi.fhir.reuse_cached_search_results_millis"      = "0"
+  "hapi.fhir.default_encoding"                        = "JSON"
+
+# spring.datasource.url / username / password injected from DATABASE_URL
+# Fly Postgres attach sets DATABASE_URL automatically.
+
+# NO [[services]] — HAPI is only reachable via private networking.
+# Fly.io apps in the same org reach it at vigil-hapi.internal:8080.
+
+[[mounts]]
+  source      = "hapi_data"
+  destination = "/data"

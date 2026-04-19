@@ -1,0 +1,51 @@
+# Fly.io config — Vigil MCP Server (vigil-mcp)
+# Deploy: fly deploy --config deploy/fly.mcp.toml --app vigil-mcp
+#
+# This app serves the 4 MCP tools at https://vigil-mcp.fly.dev/mcp
+# Prompt Opinion's runtime calls POST /mcp to invoke tools.
+# AgentCard is NOT served here — that's vigil-a2a.
+#
+# HAPI FHIR is reached via private Fly.io networking:
+#   FHIR_BASE_URL=http://vigil-hapi.internal:8080/fhir
+# HAPI is NEVER publicly routed (SEC-10).
+
+app = "vigil-mcp"
+primary_region = "sin"    # Singapore — closest to judge demo infra
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  SERVICE          = "mcp"
+  MCP_PORT         = "7001"
+  LLM_PROVIDER     = "groq"
+  FHIR_BASE_URL    = "http://vigil-hapi.internal:8080/fhir"
+  CORS_ORIGINS     = "https://vigil-frontend.vercel.app,http://localhost:3000"
+  LOG_LEVEL        = "INFO"
+  CACHE_TTL_SEC    = "300"
+
+# Secrets (set via: fly secrets set --app vigil-mcp KEY=value)
+# VIGIL_API_KEY       — shared API key across all services
+# GROQ_API_KEY        — or ANTHROPIC_API_KEY for claude provider
+# ALLOWED_FHIR_HOSTS  — comma-separated allowlist (default: vigil-hapi.internal,localhost)
+
+[[services]]
+  internal_port = 7001
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port     = 443
+    handlers = ["tls", "http"]
+  [[services.ports]]
+    port     = 80
+    handlers = ["http"]
+
+  [[services.http_checks]]
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "30s"
+    path         = "/health"
+
+[metrics]
+  port = 7001
+  path = "/metrics"
