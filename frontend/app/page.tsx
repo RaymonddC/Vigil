@@ -69,7 +69,7 @@ const FEATURES: Feature[] = [
     badge: "Path B · A2A",
     badgeClass: "bg-[#ECFDF5] text-[#065F46]",
     title: "Autonomous Postop Sentinel Agent",
-    body: "15-minute monitoring loop: IDLE → POLLING → RISK_SCORING → ESCALATING. Calls the 4 MCP tools in sequence. Never acts without clinician sign-off — every RRT alert requires one-tap approval.",
+    body: "15-minute monitoring loop: IDLE → POLLING → SCREENING → RISK_SCORING → SEPSIS_CHECK → ESCALATING → AWAITING_REVIEW. Calls all 4 MCP tools in sequence. Never acts without clinician sign-off — every RRT alert requires one-tap approval.",
   },
   {
     Icon: Database,

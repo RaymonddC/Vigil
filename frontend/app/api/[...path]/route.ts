@@ -9,7 +9,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import {
+  PatientsResponseSchema,
+  ApproveResponseSchema,
+} from "@/lib/api";
+import type { z } from "zod";
 
 // Server-side only — never exposed to browser
 const BACKEND_URL =
@@ -19,40 +23,11 @@ const BACKEND_URL =
 const VIGIL_API_KEY = process.env.VIGIL_API_KEY ?? "";
 
 // ---------------------------------------------------------------------------
-// Zod schemas for typed response validation
+// Schema map — reuses schemas from lib/api.ts (single source of truth)
 // ---------------------------------------------------------------------------
 
-const PatientSummarySchema = z.object({
-  id: z.string(),
-  mrn: z.string(),
-  name: z.string(),
-  age: z.number().nullable(),
-  trajectory: z.string(),
-  latest_risk_band: z.string(),
-  latest_alert_at: z.string().nullable(),
-  unread_alerts: z.number(),
-});
-
-const PatientsResponseSchema = z.object({
-  patients: z.array(PatientSummarySchema),
-});
-
-const ApproveResponseSchema = z.object({
-  alert_id: z.string(),
-  status: z.string(),
-  acknowledged_at: z.string(),
-  audit_id: z.string(),
-});
-
-const HealthResponseSchema = z.object({
-  status: z.string(),
-  ts: z.string(),
-});
-
-// Map path prefixes to their response schemas for validation
 const SCHEMA_MAP: Record<string, z.ZodType> = {
-  "patients": PatientsResponseSchema,
-  "health": HealthResponseSchema,
+  patients: PatientsResponseSchema,
 };
 
 // ---------------------------------------------------------------------------
@@ -86,7 +61,7 @@ function sanitizeForLog(data: unknown): unknown {
 
   const sanitized: Record<string, unknown> = {};
   const REDACT_KEYS = new Set([
-    "api_key", "apiKey", "api-key",
+    "api_key", "apikey", "api-key",
     "token", "access_token", "fhir_token",
     "authorization", "secret", "password",
     "x-api-key", "x-fhir-access-token",
@@ -104,11 +79,11 @@ function sanitizeForLog(data: unknown): unknown {
 
 /**
  * Validate response data against zod schema if one exists for the path.
- * Returns the parsed data (passthrough on unknown paths).
+ * Logs warnings on mismatch but still returns data (non-blocking).
  */
-function validateResponse(pathSegments: string[], data: unknown): unknown {
+function validateResponse(pathSegments: string[], data: unknown): void {
   const firstSegment = pathSegments[0];
-  if (!firstSegment) return data;
+  if (!firstSegment) return;
 
   // Check for approve endpoint: patients/{id}/alerts/{alertId}/approve
   if (
@@ -123,7 +98,7 @@ function validateResponse(pathSegments: string[], data: unknown): unknown {
         result.error.issues.map((i) => i.message).join(", ")
       );
     }
-    return data;
+    return;
   }
 
   // Check top-level schema
@@ -137,8 +112,6 @@ function validateResponse(pathSegments: string[], data: unknown): unknown {
       );
     }
   }
-
-  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,4 +186,3 @@ export const GET = proxyRequest;
 export const POST = proxyRequest;
 export const PUT = proxyRequest;
 export const PATCH = proxyRequest;
-export const DELETE = proxyRequest;
