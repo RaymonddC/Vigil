@@ -23,7 +23,7 @@ import type { RiskLevel } from '@/lib/risk';
 const SEVERITY_LEVEL: Record<QueueAlert['severity'], RiskLevel> = {
   critical: 'critical',
   urgent:   'high',
-  info:     'low',
+  info:     'normal',
 };
 
 const SEVERITY_HEADLINE: Record<QueueAlert['severity'], string> = {
