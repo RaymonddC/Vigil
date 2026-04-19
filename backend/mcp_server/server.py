@@ -26,6 +26,7 @@ from pydantic import Field
 
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
 from backend.mcp_server.middleware import SharpHeaderMiddleware
+from backend.mcp_server.tools import flag_sepsis_onset as _b4
 from backend.mcp_server.tools import score_deterioration_risk as _b3
 from backend.mcp_server.tools import screen_vital_thresholds as _b2
 
@@ -207,15 +208,11 @@ async def flag_sepsis_onset(
     ] = 24,
     ctx: Context | None = None,
 ) -> str:
-    """Stub — will be implemented by tool-builder."""
+    """Run CDC ASE surveillance logic with SIRS fallback."""
     sharp = get_sharp_context(ctx)
     pid = resolve_patient_id(patient_id, sharp)
     logger.info("tool called", extra={"tool": "flag_sepsis_onset", "patient_id": pid})
-    return json.dumps({
-        "status": "ok", "patient_id": pid,
-        "sepsis_suspected": False, "mode": "cdc_ase",
-        "criteria_met": [], "onset_estimate": None, "evidence": {},
-    })
+    return await _b4.run(pid, evaluation_window_hours, sharp)
 
 
 @mcp.tool(
