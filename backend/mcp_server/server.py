@@ -11,7 +11,6 @@ Reference: po-community-mcp/python/main.py, mcp_instance.py
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -27,6 +26,7 @@ from pydantic import Field
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
 from backend.mcp_server.middleware import SharpHeaderMiddleware
 from backend.mcp_server.tools import flag_sepsis_onset as _b4
+from backend.mcp_server.tools import generate_escalation_note as _b5
 from backend.mcp_server.tools import score_deterioration_risk as _b3
 from backend.mcp_server.tools import screen_vital_thresholds as _b2
 
@@ -252,22 +252,13 @@ async def generate_escalation_note(
     ] = "charge_nurse",
     ctx: Context | None = None,
 ) -> str:
-    """Stub — will be implemented by tool-builder."""
+    """Generate SBAR escalation note via LLM from screening outputs."""
     sharp = get_sharp_context(ctx)
     pid = resolve_patient_id(patient_id, sharp)
     logger.info("tool called", extra={"tool": "generate_escalation_note", "patient_id": pid})
-    return json.dumps({
-        "status": "ok", "patient_id": pid,
-        "sbar": {
-            "situation": "stub", "background": "stub",
-            "assessment": "stub", "recommendation": "stub",
-        },
-        "narrative": "S: stub B: stub A: stub R: stub",
-        "severity": "info", "recipient_role": recipient_role,
-        "communication_draft": {},
-        "generated_at": "2026-01-01T00:00:00Z",
-        "model_used": "stub/template",
-    })
+    return await _b5.run(
+        pid, vitals_result, risk_result, sepsis_result, recipient_role, sharp,
+    )
 
 
 # ---------------------------------------------------------------------------
