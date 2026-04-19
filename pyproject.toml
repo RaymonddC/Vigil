@@ -1,0 +1,46 @@
+[project]
+name = "vigil"
+version = "0.1.0"
+description = "Postoperative + maternal deterioration sentinel — MCP server + A2A agent"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.9.0",
+    "a2a-sdk[http-server]>=0.2.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.8",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+ollama = ["ollama>=0.4"]
+groq = ["groq>=0.12"]
+anthropic = ["anthropic>=0.40"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
