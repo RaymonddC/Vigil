@@ -28,7 +28,7 @@ Vigil — agentic sentinel for postop + postpartum deterioration
 
 ### Inspiration
 
-Every year, 4.2 million people die within 30 days of surgery — more than HIV, tuberculosis, and malaria combined ([Nepogodiev, *Lancet* 2019](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(18)33139-8/fulltext)). A woman dies every two minutes from obstetric complications ([WHO 2023](https://www.who.int/news/item/23-02-2023-a-woman-dies-every-two-minutes-due-to-pregnancy-or-childbirth--un-agencies)). In both cases, the warning signs appear 30–60 minutes before crisis. But no single vital crosses a hard threshold — the danger lives in the *pattern* across HR trend, BP trend, and nursing context. On post-surgical wards one nurse covers 6–8 patients. No human holds that multivariate pattern in their head for all of them.
+Every year, 4.2 million people die within 30 days of surgery — more than HIV, tuberculosis, and malaria combined ([Nepogodiev, *Lancet* 2019](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(18)33139-8/fulltext)). A woman dies every two minutes from obstetric complications ([WHO 2023](https://www.who.int/news/item/23-02-2023-a-woman-dies-every-two-minutes-due-to-pregnancy-or-childbirth--un-agencies)). In the US, Black women die from pregnancy-related causes at **2.6× the rate of white women**, and over 80% of those deaths are preventable ([CDC MMWR 2023](https://www.cdc.gov/mmwr/volumes/72/wr/mm7235e1.htm)). The "fourth trimester" — the 12 weeks postpartum — is when most maternal deaths happen, and it's exactly when clinical attention drops off. In both postop and postpartum, the warning signs appear 30–60 minutes before crisis. But no single vital crosses a hard threshold — the danger lives in the *pattern* across HR trend, BP trend, and nursing context. On post-surgical wards one nurse covers 6–8 patients. No human holds that multivariate pattern in their head for all of them.
 
 Current AI solutions for postoperative care show only marginal lift over traditional scoring systems like MEWS and qSOFA ([Moll, Khanna & Mathur, *Crit Care Sci* 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12266812/)). And clinicians override 70–90% of threshold-based alerts ([AHRQ PSNet](https://psnet.ahrq.gov/primer/alert-fatigue)). The problem isn't more alerts — it's better *orchestration* of existing clinical knowledge.
 
@@ -73,7 +73,7 @@ Vigil is a clinical early-warning system that monitors post-surgical and postpar
 
 - **Closed-loop FHIR write in a hackathon project.** Not a mock — clinician approves, `Communication` + `AuditEvent` land in HAPI, toast confirms the resource IDs. This is what Stephon Proctor (CHOP) calls "agentic, not dashboard."
 - **Zero code changes between postop and postpartum.** The same 4 tools fire on PT-007 (CABG, day 2) and PT-009 (postpartum sepsis, day 3). No `if ward == "OB"` anywhere. The FHIR data is the abstraction.
-- **69 tests, including 39 SHARP compliance tests.** For a hackathon. Because interop isn't real if it's not tested.
+- **312 tests, including 39 SHARP compliance tests and a 38-test integration harness covering 4 trajectories × 4 tools × 3 SHARP patterns.** For a hackathon. Because interop isn't real if it's not tested.
 - **Every clinical claim cites a source with a strength rating.** `CLINICAL_EVIDENCE.md` tracks 12 citation categories, flags weak claims, and recommends rephrasings. We caught our own overclaim ("35% sepsis mortality reduction" → actual figure is 18%, Nature Medicine 2022) during self-review.
 
 ### What we learned
