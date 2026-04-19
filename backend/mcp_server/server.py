@@ -25,6 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
+from backend.mcp_server.middleware import SharpHeaderMiddleware
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -305,6 +306,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(SharpHeaderMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
