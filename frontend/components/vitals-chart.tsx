@@ -1,5 +1,6 @@
-"use client";
+'use client';
 
+import { useState } from 'react';
 import {
   LineChart,
   Line,
@@ -9,7 +10,8 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-} from "recharts";
+  ReferenceLine,
+} from 'recharts';
 
 export interface VitalsDataPoint {
   t: string;       // time label, e.g. "08:00"
@@ -22,80 +24,205 @@ export interface VitalsDataPoint {
 
 export interface VitalsChartProps {
   data?: VitalsDataPoint[];
-  axis?: "all" | "bp" | "hr-rr" | "spo2" | "temp";
+  /** Initial axis view; internal toggle manages subsequent changes. */
+  initialAxis?: 'all' | 'bp' | 'hr-rr' | 'spo2' | 'temp';
+  /** Formatted time labels ("HH:MM") matching chart t-values where a trigger fired. */
+  triggerTimes?: string[];
   height?: number;
 }
 
+type AxisMode = 'all' | 'bp' | 'hr-rr' | 'spo2' | 'temp';
+
 const SAMPLE_DATA: VitalsDataPoint[] = [
-  { t: "08:00", hr: 82,  spo2: 98, map: 88, rr: 14, tempC: 37.0 },
-  { t: "09:00", hr: 94,  spo2: 96, map: 82, rr: 16, tempC: 37.4 },
-  { t: "10:00", hr: 112, spo2: 94, map: 74, rr: 20, tempC: 38.1 },
-  { t: "10:30", hr: 128, spo2: 91, map: 58, rr: 26, tempC: 38.9 },
+  { t: '08:00', hr: 82,  spo2: 98, map: 88, rr: 14, tempC: 37.0 },
+  { t: '09:00', hr: 94,  spo2: 96, map: 82, rr: 16, tempC: 37.4 },
+  { t: '10:00', hr: 112, spo2: 94, map: 74, rr: 20, tempC: 38.1 },
+  { t: '10:30', hr: 128, spo2: 91, map: 58, rr: 26, tempC: 38.9 },
 ];
 
 const VITAL_CONFIG = {
-  hr:    { stroke: "#DC2626", name: "HR",   unit: "bpm" },
-  spo2:  { stroke: "#2563EB", name: "SpO₂", unit: "%" },
-  map:   { stroke: "#7C3AED", name: "MAP",  unit: "mmHg" },
-  rr:    { stroke: "#0891B2", name: "RR",   unit: "/min" },
-  tempC: { stroke: "#D97706", name: "Temp", unit: "°C" },
+  hr:    { stroke: '#DC2626', name: 'HR',   unit: 'bpm' },
+  spo2:  { stroke: '#2563EB', name: 'SpO₂', unit: '%' },
+  map:   { stroke: '#7C3AED', name: 'MAP',  unit: 'mmHg' },
+  rr:    { stroke: '#0891B2', name: 'RR',   unit: '/min' },
+  tempC: { stroke: '#D97706', name: 'Temp', unit: '°C' },
 } as const;
 
 type VitalKey = keyof typeof VITAL_CONFIG;
 
-const AXIS_KEYS: Record<NonNullable<VitalsChartProps["axis"]>, VitalKey[]> = {
-  all:    ["hr", "spo2", "map", "rr", "tempC"],
-  bp:     ["map"],
-  "hr-rr": ["hr", "rr"],
-  spo2:   ["spo2"],
-  temp:   ["tempC"],
+const AXIS_KEYS: Record<AxisMode, VitalKey[]> = {
+  all:     ['hr', 'spo2', 'map', 'rr', 'tempC'],
+  bp:      ['map'],
+  'hr-rr': ['hr', 'rr'],
+  spo2:    ['spo2'],
+  temp:    ['tempC'],
 };
 
-export function VitalsChart({ data = SAMPLE_DATA, axis = "all", height = 320 }: VitalsChartProps) {
+const AXIS_LABELS: Record<AxisMode, string> = {
+  all:     'All',
+  bp:      'BP',
+  'hr-rr': 'HR / RR',
+  spo2:    'SpO₂',
+  temp:    'Temp',
+};
+
+// MEWT threshold reference lines — shown only when a single vital group is selected.
+// Source: CLINICAL_EVIDENCE.md §2.3 — Vigil 7-parameter MEWT implementation.
+const MEWT_REFS: Partial<Record<AxisMode, Array<{ value: number; label: string; stroke: string }>>> = {
+  bp: [
+    { value: 100, label: 'SBP ≤100', stroke: '#D97706' },
+    { value: 90,  label: 'SBP ≤90',  stroke: '#DC2626' },
+  ],
+  'hr-rr': [
+    { value: 22,  label: 'RR ≥22',  stroke: '#0891B2' },
+    { value: 110, label: 'HR >110', stroke: '#D97706' },
+    { value: 130, label: 'HR >130', stroke: '#DC2626' },
+  ],
+  spo2: [
+    { value: 93, label: 'SpO₂ <93%', stroke: '#D97706' },
+    { value: 90, label: 'SpO₂ <90%', stroke: '#DC2626' },
+  ],
+  temp: [
+    { value: 36.0, label: 'Temp <36°C', stroke: '#2563EB' },
+    { value: 38.0, label: 'Temp >38°C', stroke: '#D97706' },
+  ],
+};
+
+const AXIS_MODES: AxisMode[] = ['all', 'bp', 'hr-rr', 'spo2', 'temp'];
+
+export function VitalsChart({
+  data = SAMPLE_DATA,
+  initialAxis = 'all',
+  triggerTimes = [],
+  height = 320,
+}: VitalsChartProps) {
+  const [axis, setAxis] = useState<AxisMode>(initialAxis);
   const keys = AXIS_KEYS[axis];
+  const refs = MEWT_REFS[axis] ?? [];
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-        <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
-        <XAxis
-          dataKey="t"
-          stroke="#64748B"
-          fontSize={12}
-          tick={{ fontFamily: "var(--font-geist-mono)", fill: "#64748B" }}
-        />
-        <YAxis
-          stroke="#64748B"
-          fontSize={12}
-          tick={{ fontFamily: "var(--font-geist-mono)", fill: "#64748B" }}
-          width={40}
-        />
-        <Tooltip
-          contentStyle={{
-            background: "#fff",
-            border: "1px solid #E2E8F0",
-            borderRadius: 8,
-            fontSize: 12,
-            fontFamily: "var(--font-geist-mono)",
-          }}
-          labelStyle={{ color: "#0F172A", fontWeight: 600 }}
-        />
-        <Legend
-          wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-inter)" }}
-        />
-        {keys.map((key) => (
-          <Line
-            key={key}
-            type="monotone"
-            dataKey={key}
-            stroke={VITAL_CONFIG[key].stroke}
-            strokeWidth={2}
-            dot={false}
-            name={VITAL_CONFIG[key].name}
-            isAnimationActive={false}
-          />
+    <div className="space-y-3">
+      {/* Axis toggle pills */}
+      <div
+        className="flex items-center gap-1.5 flex-wrap"
+        role="group"
+        aria-label="Select vital sign view"
+      >
+        {AXIS_MODES.map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setAxis(mode)}
+            aria-pressed={axis === mode}
+            className={[
+              'px-3 py-1 rounded-md text-xs font-medium transition-colors min-h-[32px]',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]',
+              axis === mode
+                ? 'bg-[#0B5FFF] text-white'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
+            ].join(' ')}
+          >
+            {AXIS_LABELS[mode]}
+          </button>
         ))}
-      </LineChart>
-    </ResponsiveContainer>
+      </div>
+
+      {/* MEWT threshold legend — appears when a filtered axis is selected */}
+      {refs.length > 0 && (
+        <div
+          className="flex items-center gap-3 flex-wrap text-xs text-slate-500 dark:text-slate-400"
+          aria-label="MEWT thresholds"
+        >
+          <span className="font-medium shrink-0">MEWT thresholds:</span>
+          {refs.map((r) => (
+            <span key={r.label} className="flex items-center gap-1.5">
+              <svg width="16" height="8" aria-hidden="true">
+                <line
+                  x1="0" y1="4" x2="16" y2="4"
+                  stroke={r.stroke}
+                  strokeWidth="1.5"
+                  strokeDasharray="4 4"
+                />
+              </svg>
+              <span style={{ color: r.stroke }}>{r.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Recharts multi-line chart */}
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+          <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="t"
+            stroke="#64748B"
+            fontSize={12}
+            tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
+          />
+          <YAxis
+            stroke="#64748B"
+            fontSize={12}
+            tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
+            width={40}
+          />
+          <Tooltip
+            contentStyle={{
+              background: '#fff',
+              border: '1px solid #E2E8F0',
+              borderRadius: 8,
+              fontSize: 12,
+              fontFamily: 'var(--font-geist-mono)',
+            }}
+            labelStyle={{ color: '#0F172A', fontWeight: 600 }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          formatter={(rawValue: any, name: any): [string, string] => {
+              const n = typeof rawValue === 'number' ? rawValue : 0;
+              const cfg = Object.values(VITAL_CONFIG).find((c) => c.name === name);
+              const formatted = n % 1 !== 0 ? n.toFixed(1) : String(n);
+              return [`${formatted}${cfg ? ` ${cfg.unit}` : ''}`, String(name)];
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-inter)' }} />
+
+          {/* MEWT threshold reference lines — dashed, color-coded */}
+          {refs.map((ref) => (
+            <ReferenceLine
+              key={`mewt-${ref.value}`}
+              y={ref.value}
+              stroke={ref.stroke}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+            />
+          ))}
+
+          {/* Trigger markers — vertical dashed lines at alert-fire timestamps */}
+          {triggerTimes.map((t, i) => (
+            <ReferenceLine
+              key={`trigger-${i}-${t}`}
+              x={t}
+              stroke="#DC2626"
+              strokeWidth={1.5}
+              strokeDasharray="6 3"
+              label={{ value: '▲', position: 'insideTopLeft', fontSize: 11, fill: '#DC2626' }}
+            />
+          ))}
+
+          {/* Vital sign lines — no dots for clean demo recording */}
+          {keys.map((key) => (
+            <Line
+              key={key}
+              type="monotone"
+              dataKey={key}
+              stroke={VITAL_CONFIG[key].stroke}
+              strokeWidth={2}
+              dot={false}
+              name={VITAL_CONFIG[key].name}
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
