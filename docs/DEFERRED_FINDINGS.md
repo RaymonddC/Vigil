@@ -1,0 +1,27 @@
+# Deferred Findings — out-of-scope ledger
+
+> Phase-2 rewrite (`rewrite-exec`, 2026-04-16) applied 10 of the 24 findings from `REVIEW_SECOND_OPINION.md`. The remaining items are logged here so they are not lost. Each row names the reference line in `REVIEW_SECOND_OPINION.md`, the current status, a suggested phase-N+1 owner, and whether the issue is **latent** (hidden contradiction, no observable symptom yet) or **active** (will fire on the first integration test / judge probe).
+
+| # | REVIEW ref | Finding (short) | Status | Suggested owner | Latent / active |
+|---|---|---|---|---|---|
+| 5 | REVIEW_SECOND_OPINION.md §3 item 5 (lines 102-103) | CDC ASE vs CDC SMM confusion in JUDGE_HOOKS.md | Untouched — `rewrite-lead` phase-1 research (proposal §1.5) confirmed the literal string "CDC Severe Maternal Morbidity" is no longer present in JUDGE_HOOKS.md; current text reads "CDC Adult Sepsis Event". Effectively already resolved, but a grep sweep as part of phase-N+1 should re-verify no new drift. | planning-qa | Latent (verify only) |
+| 7 (partial) | REVIEW_SECOND_OPINION.md §3 item 7 (lines 106-107) | Frontend approve button client-side only | **Partially bundled** in phase-2 (decision 2.3): edits 3.7.a/b/c rewrote `FRONTEND_SPEC.md:207`, the §6 route table, and the `ackAlert` body. The wider §3.3/§6 refactor (auto-escalate timer wiring, retry backoff, optimistic UI) is out of scope. | frontend-developer | Active (button now calls the right URL, but UX polish deferred) |
+| 8 | REVIEW_SECOND_OPINION.md §3 item 8 (line 109) | Risk vocabulary 5 levels (FRONTEND) vs 3 levels (API_CONTRACTS) | Untouched. `FRONTEND_SPEC.md:105-113` uses `normal/low/medium/high/critical`; `API_CONTRACTS.md:212` uses `low/moderate/high` + severity `info/urgent/critical`. **Will fire on first integration test** — `<RiskBadge>` cannot render `moderate`. | integration-lead | **Active — will fire on first integration test** |
+| 9 | REVIEW_SECOND_OPINION.md §3 item 9 (line 111) | MRN / patient name scheme mismatch across 3 docs | Untouched. API_CONTRACTS has `MRN-0042` "Jane Doe"; SYNTHETIC_DATA has `MRN-100001..100010` "Synthetic Patient N"; FRONTEND_SPEC has `102394` / `Reyes, Maria`. Three incompatible conventions. **Will fire on first integration test** when the proxy serves synthetic bundles to the Next.js patient list. Also trips `RISK_REGISTER` R17 PHI-lookalike check. | integration-lead | **Active — will fire on first integration test** |
+| 10 | REVIEW_SECOND_OPINION.md §3 item 10 (line 113) | MCP / A2A port numbers disagree across 4 docs | Untouched. MCP ports: 7001 / 7000 / 5001. A2A ports: 7002 / 9000 / 9000 / 8001. docker-compose not yet locked. | devops / integration-lead | Active (demo day blocker; masked until Docker build) |
+| 11 | REVIEW_SECOND_OPINION.md §3 item 11 (line 115) | `google-adk` requires Gemini, breaks LLM abstraction | **Resolved by phase-2 Blocker-2 rewrite** of PROMPT_OPINION_INTEGRATION.md §3 + §5.2 + Appendix. Flipped in-place to raw `a2a-sdk`. No residual edit needed here. | (resolved) | — |
+| 13 | REVIEW_SECOND_OPINION.md §3 item 13 (line 119) | JUDGE_HOOKS commits to MIMIC-IV validation; BUILD_PLAN does not schedule it | Untouched. JUDGE_HOOKS.md:98/147 promises "Validated only on MIMIC-IV subset + synthetic bundles"; BUILD_PLAN has zero MIMIC-IV task. Slide would be false. | clinical-lead | Latent (only fires if a judge reads the slide) |
+| 17 | REVIEW_SECOND_OPINION.md §3 item 17 (line 127) | FastAPI frontend proxy missing from BUILD_PLAN | **Superseded** — BUILD_PLAN now has B10 (verified in phase-1 research, proposal §1.4). No action. | (resolved) | — |
+| 18 | REVIEW_SECOND_OPINION.md §3 item 18 (line 129) | Agent polling path contradicted (MCP vs direct HAPI) | **Superseded** — phase-1 research confirmed BUILD_PLAN no longer re-states the polling path. Leave ARCHITECTURE:181 as canonical for now. | integration-lead | Latent |
+| 19 | REVIEW_SECOND_OPINION.md §3 item 19 (line 131) | R01 has no human owner | Untouched. RISK_REGISTER.md:13 assigns "Tech Lead" — role doesn't map to any BUILD_PLAN §5 entry. Non-engineering (Discord outreach at PROMPT_OPINION_INTEGRATION §8). | integration-lead / demo-producer | Active (R01 is the highest-I risk) |
+| 20 | REVIEW_SECOND_OPINION.md §3 item 20 (line 133) | KS-4 trigger doesn't match its risk (R06 vs R11) | Untouched. Deliberately out of scope per phase-1 brief. | risk-owner | Latent (kill-switch routing) |
+| 21 | REVIEW_SECOND_OPINION.md §3 item 21 (line 135) | "Send to Epic" button has no backend + is anti-scope | **Superseded by phase-2 edits 3.4.a–c** — DEMO_SCRIPT.md tool-name ledger rewritten to "Approve & Send RRT". Note: teaser-variant line 183 ("The nurse sends it to Epic in one click.") was **not** in the proposal edit list but is still textually adjacent drift; flagged for a one-line follow-up. | writer / planning-qa | Latent (teaser variant only) |
+| 24 | REVIEW_SECOND_OPINION.md §3 item 24 (line 141) | Review queue persistence hand-wavy (SQLite vs in-memory) | Untouched. ARCHITECTURE.md:289 leaves it open. Demo reload breaks in-memory. | backend-architect | Active (breaks on page reload mid-demo) |
+
+**Findings 8 and 9 are the highest-urgency latents** — both will fire on the first integration test, not on a judge probe. Integration lead should schedule them ahead of B6 (`MCP server integration test harness`).
+
+Findings 17, 18, 11 are **superseded / already resolved** and are listed here only for auditability.
+
+---
+
+*Generated by `rewrite-exec` at 2026-04-16.*
