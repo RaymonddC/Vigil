@@ -15,7 +15,18 @@
   "capabilities": {
     "streaming": true,
     "pushNotifications": false,
-    "stateTransitionHistory": false
+    "stateTransitionHistory": false,
+    "extensions": [
+      {
+        "uri": "ai.promptopinion/fhir-context",
+        "description": "Accepts FHIR server URL, bearer token, and patient id via A2A message metadata under the key matching 'fhir-context'.",
+        "required": true,
+        "params": {
+          "metadata_key_suffix": "fhir-context",
+          "fields": ["fhirUrl", "fhirToken", "patientId"]
+        }
+      }
+    ]
   },
   "skills": [
     {

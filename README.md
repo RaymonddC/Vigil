@@ -116,6 +116,28 @@ cd frontend && pnpm dev  # http://localhost:3000
 
 Set `LLM_PROVIDER=claude` in `.env` before recording the demo. Development default is `ollama` + `qwen2.5:7b-instruct`.
 
+## SHARP Header Compliance
+
+Vigil implements the [SHARP on MCP](https://www.sharponmcp.com/) standard for passing FHIR context between the Prompt Opinion runtime and clinical tools. Three HTTP headers carry the context:
+
+| Header | Purpose | Required? |
+|---|---|---|
+| `x-fhir-server-url` | Base URL of the FHIR R4 server | Yes — rejected with 400 if missing |
+| `x-fhir-access-token` | Bearer token for FHIR auth | No — empty tolerated (dev HAPI has no auth) |
+| `x-patient-id` | FHIR Patient resource id | No — can come from tool input instead |
+
+**How headers flow through the stack:**
+
+1. **MCP path (Path A):** Prompt Opinion injects the 3 headers on every HTTP request to the MCP server. The server advertises `ai.promptopinion/fhir-context` in its capability extensions so PO knows to inject them. Tools read headers via `ctx.request_context.request.headers`.
+
+2. **A2A path (Path B):** FHIR context travels inside the JSON-RPC body as `message.metadata[*fhir-context*]` (not HTTP headers). The agent's `extract_fhir_from_metadata()` extracts it, then `fhir_metadata_to_sharp_headers()` bridges it back to the 3 SHARP headers for downstream MCP tool calls.
+
+3. **Frontend proxy:** The Next.js app never touches SHARP headers directly. The FastAPI proxy at `:8000` uses server-side `FHIR_BASE_URL` for all HAPI reads. No bearer tokens reach the browser.
+
+**Security:** Bearer tokens are redacted in all log paths (`_redact_token()` shows first 4 chars + `****`). SSRF protection validates `x-fhir-server-url` against an allowlist (SEC-01).
+
+**Compliance tests:** `pytest tests/test_sharp_compliance.py` — 39 tests covering all three layers, round-trip fidelity, token redaction, capability advertisement, and A2A wire format.
+
 ## Ground rules
 
 - **Zero real PHI.** All data is synthetic, all ranges are public domain.
