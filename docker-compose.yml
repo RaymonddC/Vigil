@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  hapi-db:
+    image: postgres:15-alpine
+    container_name: vigil-hapi-db
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: hapi
+      POSTGRES_PASSWORD: hapi
+    volumes:
+      - hapi-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hapi -d hapi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  hapi:
+    image: hapiproject/hapi:v7.2.0
+    container_name: vigil-hapi
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      hapi-db:
+        condition: service_healthy
+    environment:
+      "spring.datasource.url": "jdbc:postgresql://hapi-db:5432/hapi"
+      "spring.datasource.username": "hapi"
+      "spring.datasource.password": "hapi"
+      "spring.datasource.driverClassName": "org.postgresql.Driver"
+      "spring.jpa.properties.hibernate.dialect": "ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect"
+      "hapi.fhir.fhir_version": "R4"
+      "hapi.fhir.allow_multiple_delete": "true"
+      "hapi.fhir.reuse_cached_search_results_millis": "0"
+      "hapi.fhir.default_encoding": "JSON"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/fhir/metadata > /dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  hapi-db-data:
+    driver: local
