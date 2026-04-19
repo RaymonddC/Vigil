@@ -18,7 +18,7 @@ mcp:
 	uv run python -m backend.mcp_server.server
 
 agent:
-	uv run python -m backend.a2a_agent.main
+	uv run python -m backend.a2a_agent
 
 proxy:
 	uv run uvicorn backend.api.main:app --host 127.0.0.1 --port 8000 --reload

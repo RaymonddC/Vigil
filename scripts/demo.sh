@@ -127,7 +127,7 @@ log "  MCP server ready."
 # ---------------------------------------------------------------------------
 
 log "Step 4/6: Starting A2A agent on :$A2A_PORT..."
-uv run python -m backend.a2a_agent.main > "$LOG_DIR/a2a.log" 2>&1 &
+uv run python -m backend.a2a_agent > "$LOG_DIR/a2a.log" 2>&1 &
 echo $! > "$PID_DIR/a2a.pid"
 
 DEADLINE=$((SECONDS + 30))
