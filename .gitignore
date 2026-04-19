@@ -36,6 +36,12 @@ docker-compose.override.yml
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+test-results/
+playwright-report/
+
+# Demo runtime
+.demo-pids/
+.demo-logs/
 
 # OS
 .DS_Store

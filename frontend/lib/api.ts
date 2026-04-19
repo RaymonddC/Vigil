@@ -134,8 +134,21 @@ export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 // Server-side API functions (RSC — direct to FastAPI)
 // ---------------------------------------------------------------------------
 
+/**
+ * Build headers for server-side fetches. Injects X-API-Key from env so RSC
+ * requests pass the FastAPI proxy's API key middleware (SEC-05). Never runs
+ * in browser code — SERVER_BASE is only reachable from the server.
+ */
+function buildServerHeaders(): HeadersInit {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const apiKey = process.env.VIGIL_API_KEY;
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  return headers;
+}
+
 export async function getPatients(): Promise<PatientsResponse> {
   const res = await fetch(`${SERVER_BASE}/api/patients`, {
+    headers: buildServerHeaders(),
     next: { revalidate: 10 },
   });
   if (!res.ok) throw new Error("patients fetch failed");
@@ -145,6 +158,7 @@ export async function getPatients(): Promise<PatientsResponse> {
 
 export async function getPatient(id: string): Promise<PatientDetail> {
   const res = await fetch(`${SERVER_BASE}/api/patients/${id}`, {
+    headers: buildServerHeaders(),
     next: { revalidate: 10 },
   });
   if (!res.ok) throw new Error(`patient ${id} fetch failed`);
@@ -154,6 +168,7 @@ export async function getPatient(id: string): Promise<PatientDetail> {
 
 export async function getLatestAlert(pid: string): Promise<LatestAlert> {
   const res = await fetch(`${SERVER_BASE}/api/patients/${pid}/alerts/latest`, {
+    headers: buildServerHeaders(),
     next: { revalidate: 5 },
   });
   if (!res.ok) throw new Error(`latest alert for ${pid} fetch failed`);
@@ -167,7 +182,7 @@ export async function getAlert(
 ): Promise<LatestAlert> {
   const res = await fetch(
     `${SERVER_BASE}/api/patients/${pid}/alerts/${aid}`,
-    { next: { revalidate: 10 } }
+    { headers: buildServerHeaders(), next: { revalidate: 10 } }
   );
   if (!res.ok) throw new Error(`alert ${aid} fetch failed`);
   const data = await res.json();
@@ -176,6 +191,7 @@ export async function getAlert(
 
 export async function getStatus(): Promise<StatusResponse> {
   const res = await fetch(`${SERVER_BASE}/api/status`, {
+    headers: buildServerHeaders(),
     next: { revalidate: 30 },
   });
   if (!res.ok) throw new Error("status fetch failed");
@@ -187,7 +203,10 @@ export async function getEvents(since?: string) {
   const url = since
     ? `${SERVER_BASE}/api/events/tail?since=${encodeURIComponent(since)}`
     : `${SERVER_BASE}/api/events/tail`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, {
+    headers: buildServerHeaders(),
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error("events fetch failed");
   return res.json();
 }

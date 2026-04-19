@@ -1,4 +1,4 @@
-.PHONY: up down seed dev mcp agent test lint ci demo-warmup
+.PHONY: up down seed dev mcp agent test lint ci demo demo-stop demo-warmup e2e
 
 # Infrastructure
 up:
@@ -37,8 +37,13 @@ lint:
 
 ci: lint test
 
-# Demo
-demo: up seed mcp agent proxy frontend
+# Demo — orchestrated startup with health checks
+demo:
+	./scripts/demo.sh
+
+demo-stop:
+	./scripts/demo.sh --stop
+	docker compose down
 
 demo-warmup:
 	@echo "=== Pre-flight: reseed HAPI ==="
@@ -51,3 +56,8 @@ demo-warmup:
 	curl -sf http://localhost:3000/ > /dev/null
 	curl -sf http://localhost:3000/patients > /dev/null
 	@echo "=== All services healthy ==="
+
+# E2E tests (requires make demo running)
+e2e:
+	cd frontend && npx playwright install --with-deps chromium
+	cd tests/e2e && npx playwright test --config playwright.config.ts
