@@ -18,19 +18,22 @@ gantt
     F2 Criteria rule modules      :f2, after f1, 4
     F4 FHIR client lib            :f4, after f1, 3
     F5 LLM provider abstraction   :f5, after f1, 3
+    F9 PO dry-run                 :f9, after f1, 3
     section Backend
     B1 MCP server skeleton        :b1, after f2 f4 f5, 2
     B2 screen_vital_thresholds    :b2, after b1, 3
     B7 A2A Postop Sentinel agent  :b7, after b2, 5
     section Integration
     I1 End-to-end wiring          :i1, after b7, 3
+    I5 Public hosting             :i5, after i1, 3
     I3 Frontend <-> backend glue  :i3, after i1, 3
     section Polish
-    P1 Demo script + record       :p1, after i3, 4
+    P1.5 Pre-flight + rehearsal   :p15, after i3, 2
+    P1 Demo script + record       :p1, after p15, 4
     P3 Submit Devpost + Marketplace :p3, after p1, 2
 ```
 
-Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + P1(4) + P3(2) = 28h** of single-thread work. Everything else runs in parallel and does not extend this chain.
+Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + P1.5(2) + P1(4) + P3(2) = 30h** of single-thread work. Everything else runs in parallel and does not extend this chain.
 
 ---
 
@@ -52,8 +55,8 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 **F1 — Repo scaffold & tooling**
 - Owner: integration-lead / backend-architect · Depends: none · Est: 2h
 - Description: Create monorepo layout (`backend/`, `frontend/`, `data/`, `docs/`, `tests/`), pyproject.toml with `mcp`, `a2a-sdk`, `httpx`, `pydantic`, pre-commit, ruff, pytest. GitHub Actions CI stub.
-- Acceptance: `uv sync` installs clean / `pytest` runs (0 tests ok) / `ruff check` passes / CI passes on empty push / README stub present
-- Artifacts: `pyproject.toml`, `.github/workflows/ci.yml`, folder tree
+- Acceptance: `uv sync` installs clean / `pytest` runs (0 tests ok) / `ruff check` passes / CI passes on empty push / README stub present / **LICENSE file (MIT) present in repo root** / `.gitignore` covers `.env`, `__pycache__`, `node_modules`, `.next`
+- Artifacts: `pyproject.toml`, `.github/workflows/ci.yml`, folder tree, `LICENSE`, `.gitignore`
 
 **F2 — Criteria rule modules**
 - Owner: backend-architect · Depends: F1 · Est: 4h
@@ -97,12 +100,24 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 - Acceptance: Every schema has example payload / schemas match pydantic models / reviewed by frontend-developer / locked with version string / linked from README
 - Artifacts: `docs/API_CONTRACTS.md`, `backend/schemas.py`
 
+**F9 — Prompt Opinion account + listing dry-run**
+- Owner: integration-lead · Depends: F1 · Est: 3h
+- Description: Create Prompt Opinion account, join Discord, reverse-engineer the publishing flow. Attempt to list a stub MCP server (even if empty/hello-world) to validate the end-to-end listing path. Document the flow step-by-step. This is the #1 risk in the project (R01, score 20) — doing it in Phase 1 gives us 3 weeks to recover if it fails.
+- Acceptance: PO account created / Discord joined / 5 questions from `PROMPT_OPINION_INTEGRATION.md §8` asked / stub MCP server successfully listed (or KS-1 triggered with documented blockers) / listing flow documented step-by-step in `docs/PROMPT_OPINION_INTEGRATION.md §6` / manifest schema captured if one exists
+- Artifacts: PO account credentials (NOT in repo), updated `docs/PROMPT_OPINION_INTEGRATION.md`
+
+**F6.5 — HAPI-shaped fixture server (KS-2 fallback)**
+- Owner: data-engineer · Depends: F3 · Est: 2h
+- Description: Tiny FastAPI app that serves the same FHIR R4 bundle shapes as HAPI from static JSON files. Same `make seed` populates it. Don't deploy unless KS-2 fires (HAPI fails on WSL2), but have it ready to swap in with a single env var change (`FHIR_BACKEND=fixture`).
+- Acceptance: `GET /fhir/Patient`, `GET /fhir/Observation?patient=PT-001` return identical shapes to HAPI / same seed script works / swap triggered by env var / documented as KS-2 pivot in `RISK_REGISTER.md`
+- Artifacts: `backend/fhir_fixture/main.py`, `backend/fhir_fixture/serve.py`
+
 ### Phase 2 — Backend
 
 **B1 — MCP server skeleton**
 - Owner: backend-architect · Depends: F2, F4, F5, F8 · Est: 2h
 - Description: `backend/mcp_server/server.py` using FastMCP, middleware to parse SHARP headers into request context, health route.
-- Acceptance: `uv run mcp dev backend/mcp_server/server.py` opens inspector / headers visible in context / 0 tools OK for now / logs structured JSON / graceful shutdown
+- Acceptance: `uv run mcp dev backend/mcp_server/server.py` opens inspector / headers visible in context / 0 tools OK for now / logs structured JSON / graceful shutdown / **capability extension `ai.promptopinion/fhir-context` advertised via `get_capabilities` patch per `API_CONTRACTS.md §2`; verified by inspecting `tool/list` response**
 - Artifacts: `backend/mcp_server/server.py`, `backend/mcp_server/context.py`
 
 **B2 — Tool: `screen_vital_thresholds`**
@@ -132,14 +147,14 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 **B6 — MCP server integration test harness**
 - Owner: backend-architect · Depends: B2, B3, B4, B5 · Est: 2h
 - Description: End-to-end pytest suite spinning up HAPI + MCP server, calling all 4 tools against all 10 patients.
-- Acceptance: `pytest tests/integration` green / runs in <90s / fixtures reset HAPI between tests / JUnit xml emitted / CI runs it in matrix
+- Acceptance: `pytest tests/integration` green / runs in <90s / fixtures reset HAPI between tests / JUnit xml emitted / CI runs it in matrix / **each tool tested with (a) patient_id from input only, (b) patient_id from SHARP header only, (c) both present (input wins)**
 - Artifacts: `tests/integration/test_mcp_tools.py`
 
 **B7 — A2A Postop Sentinel agent**
 - Owner: backend-architect · Depends: B2, B3, B4, B5 · Est: 5h
 - Description: `a2a-sdk` agent with explicit state machine: IDLE → POLLING → SCREENING → RISK_SCORING → SEPSIS_CHECK → ESCALATING → AWAITING_REVIEW. Each state calls one of the four canonical MCP tools and emits a trace event. State machine terminates at `AWAITING_REVIEW` — the agent never writes to FHIR; only the FastAPI proxy's approve endpoint (B10) persists `Communication` + `AuditEvent`.
-- Acceptance: Runs PT-001 (no alert) / PT-007 (escalates at T+2h per trend rule) / PT-009 (CDC ASE fires at T+4h) / PT-010 (postpartum hemorrhage path) / state transitions logged / agent posts draft to review queue but never to HAPI
-- Artifacts: `backend/a2a_agent/sentinel.py`, `backend/a2a_agent/states.py`, test
+- Acceptance: Runs PT-001 (no alert) / PT-007 (escalates at T+2h per trend rule) / PT-009 (CDC ASE fires at T+4h) / PT-010 (postpartum hemorrhage path) / state transitions logged / agent posts draft to review queue but never to HAPI / **AgentCard JSON served at `/.well-known/agent-card.json` matching `API_CONTRACTS.md §3` (camelCase aliases); PO discovery test passes** / **`POLL_INTERVAL_SEC` env honored (default 900, demo 30)** / **`extract_fhir_from_payload` bridge translates A2A `message.metadata[*fhir-context*]` → 3 SHARP headers for downstream MCP calls (see `API_CONTRACTS.md §4`)**
+- Artifacts: `backend/a2a_agent/sentinel.py`, `backend/a2a_agent/states.py`, `backend/a2a_agent/fhir_hook.py`, test
 
 **B8 — SHARP header enforcement + security**
 - Owner: backend-architect · Depends: B1 · Est: 2h
@@ -149,14 +164,14 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 
 **B10 — FastAPI frontend proxy + `list_postop_patients` + approve endpoint**
 - Owner: backend-architect · Depends: B1, F4 · Est: 3h
-- Description: Thin FastAPI service at `backend/api/` that powers the Next.js dashboard. Hosts `GET /api/patients` (the former `list_postop_patients` — not an MCP tool, it enumerates the cohort rather than acting on a patient-in-context), `GET /api/patients/{id}`, `GET /api/patients/{id}/alerts/latest`, and `POST /api/patients/{id}/alerts/{alertId}/approve`. The approve endpoint is the **only** place in the stack that writes `Communication` (status `completed`) plus an `AuditEvent` to HAPI. See `API_CONTRACTS.md §6`.
+- Description: Thin FastAPI service at `backend/api/` that powers the Next.js dashboard. Hosts `GET /api/patients`, `GET /api/patients/{id}`, `GET /api/patients/{id}/alerts/latest`, `POST /api/patients/{id}/alerts/{alertId}/approve`, and **`POST /api/agent/tick` (triggers an immediate A2A polling cycle — critical for demo recording where `POLL_INTERVAL_SEC=30` is still too slow)**. The approve endpoint is the **only** place in the stack that writes `Communication` (status `completed`) plus an `AuditEvent` to HAPI. See `API_CONTRACTS.md §6`.
 - Acceptance: All 4 endpoints return the shapes in `API_CONTRACTS.md §6` / approve writes `Communication` + `AuditEvent` and returns the new audit id / survives page reload (uses SQLite for review queue) / `list_postop_patients` enumerates all 10 seeded synthetic patients / no writes from any other endpoint
 - Artifacts: `backend/api/main.py`, `backend/api/routes/patients.py`, `backend/api/review_queue.py`, test
 
 **B9 — Observability + structured logging**
 - Owner: backend-architect · Depends: B1 · Est: 2h
-- Description: JSON logs, request IDs, tool-call timings, LLM token usage counters. Tail endpoint for frontend Timeline view.
-- Acceptance: Every tool call logs duration and status / request_id propagates across MCP + A2A / Prometheus-style metrics optional / no PII in logs / frontend consumes `/events/tail`
+- Description: JSON logs, request IDs, tool-call timings, LLM token usage counters. Tail endpoint for frontend Timeline view via **polling** (not SSE — simpler, demo-friendly).
+- Acceptance: Every tool call logs duration and status / request_id propagates across MCP + A2A / Prometheus-style metrics optional / no PII in logs / **`GET /api/events/tail?since=<ts>` returns events newer than timestamp; frontend polls at 2s interval**
 - Artifacts: `backend/obs/logging.py`, `backend/obs/metrics.py`
 
 ### Phase 3 — Frontend + Integration
@@ -175,8 +190,8 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 
 **FE3 — Timeline view (A2A trace)**
 - Owner: frontend-developer · Depends: FE1, B7, B9 · Est: 4h
-- Description: Renders A2A state machine events chronologically: POLLING / SCREENING / RISK_SCORING / SEPSIS_CHECK / ESCALATING / AWAITING_REVIEW with expandable tool-call details.
-- Acceptance: Live tail via SSE or polling / color-coded by state / filterable by patient / replay button / shows LLM rationale
+- Description: Renders A2A state machine events chronologically: POLLING / SCREENING / RISK_SCORING / SEPSIS_CHECK / ESCALATING / AWAITING_REVIEW with expandable tool-call details. Includes **"Tick Now" button** that calls `POST /api/agent/tick` (B10) to trigger an immediate agent cycle.
+- Acceptance: **Polls `GET /api/events/tail?since=<ts>` at 2s interval** (not SSE) / color-coded by state / filterable by patient / "Tick Now" button triggers immediate cycle / shows LLM rationale
 - Artifacts: `frontend/app/timeline/page.tsx`
 
 **FE4 — Alerts view**
@@ -191,10 +206,10 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 - Acceptance: `/api/mcp/*` proxies work / headers injected server-side / no api-keys reach browser / typed zod response / error forwarding
 - Artifacts: `frontend/app/api/mcp/[...tool]/route.ts`
 
-**FE6 — Settings panel (provider swap)**
+**FE6 — Provider & FHIR status panel (read-only)**
 - Owner: frontend-developer · Depends: FE5, F5 · Est: 2h
-- Description: UI to swap LLM provider (Ollama / Groq / Claude) and FHIR URL — demonstrates SHARP at runtime.
-- Acceptance: Dropdown updates proxy behavior / keys never stored in localStorage / reset button / tested with all 3 providers / documented
+- Description: Read-only panel showing current LLM provider, model name, FHIR base URL, and connection status. Provider is set server-side via `LLM_PROVIDER` env var (PROJECT_BRIEF:56) — **no swap UI**, no mutation endpoint. FHIR URL comes from SHARP headers set by Prompt Opinion, not the user.
+- Acceptance: Displays current provider + model + FHIR URL fetched from `GET /api/status` / connection health indicator (green/red) / no mutation controls / no keys in localStorage / responsive
 - Artifacts: `frontend/app/settings/page.tsx`
 
 **FE7 — Landing / branding**
@@ -227,13 +242,25 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 - Acceptance: Repeat tool call <100ms / cache keyed by SHARP config / cache invalidation on provider swap / metric exposed / test
 - Artifacts: `backend/cache.py`
 
+**I5 — Public backend hosting + tunnel fallback**
+- Owner: integration-lead · Depends: B7, B10 · Est: 3h
+- Description: Deploy HAPI + MCP server + A2A agent to a reachable public URL so Prompt Opinion's runtime can call them. Primary: Fly.io or Railway. Fallback: `ngrok http` or `cloudflared tunnel` for demo day. Without a public URL, P4 marketplace listings can't be exercised by judges.
+- Acceptance: PO runtime can call MCP `tool/list` against the public URL / AgentCard fetchable at `https://<host>/.well-known/agent-card.json` / HAPI bound to `127.0.0.1:8080` (not `0.0.0.0`) per SEC-01 / ngrok fallback documented / tunnel URL updatable in Vercel env without redeploy
+- Artifacts: deployment config, `docs/DEPLOY.md`
+
 ### Phase 4 — Polish + Submit
 
 **P1 — Demo script + video**
 - Owner: demo-producer · Depends: I1, FE1-FE7 · Est: 4h
 - Description: 2:45 script targeting all 5 judge hooks (Mathur/Mandel/Hickey/Proctor/Zheng). Record with OBS, edit, upload to YouTube unlisted.
-- Acceptance: <=3:00 / opens with postop patient story / shows tool call + A2A state trace / lands 5 judge hooks / 1080p, captioned
+- Acceptance: <=3:00 / opens with postop patient story / shows tool call + A2A state trace / lands 5 judge hooks / 1080p / **SRT caption file generated (Whisper or YouTube auto-caption + hand-edit) and uploaded with video**
 - Artifacts: `docs/DEMO_SCRIPT.md`, YouTube URL
+
+**P1.5 — Demo pre-flight script + 5x rehearsal**
+- Owner: integration-lead · Depends: I1 · Est: 2h
+- Description: `make demo-warmup` resets HAPI seed, pings LLM provider health, ticks agent once, warms all frontend routes. Run the full demo flow 5 times cleanly before the real recording take. Log each rehearsal run.
+- Acceptance: `make demo-warmup` exits 0 with all services healthy / 5 clean rehearsal runs logged in `docs/REHEARSAL_LOG.md` before P1 recording starts / any runtime error found during rehearsal is fixed before recording
+- Artifacts: `Makefile` (demo-warmup target), `docs/REHEARSAL_LOG.md`
 
 **P2 — README + architecture diagrams**
 - Owner: demo-producer · Depends: I1 · Est: 3h
@@ -272,12 +299,13 @@ Critical path length: **F1(2) + F2(4) + B1(2) + B2(3) + B7(5) + I1(3) + I3(3) + 
 ```
 F1 (blocks all)
  ├── F2 ┐
- ├── F3 │  (5-way parallel on 5 teammates)
- ├── F4 │
+ ├── F3 │
+ ├── F4 │  (7-way parallel on 5+ teammates)
  ├── F5 │
- ├── F6 │
+ ├── F6 ──► F6.5 (KS-2 fallback, after F3)
  ├── F7 │
- └── F8 ┘ (needs F2+F4 but runs parallel to F3/F6/F7)
+ ├── F8 ┘ (needs F2+F4 but runs parallel to F3/F6/F7)
+ └── F9   (PO dry-run, integration-lead, parallel to all above)
            │
            ▼
         B1 (blocks B2-B5, B8, B9, B10)
@@ -291,7 +319,7 @@ F1 (blocks all)
        B5 (generate_escalation_note)
        │
        ▼
-       B6 ──► B7 (A2A agent — solo)
+       B6 ──► B7 (A2A agent + AgentCard + FHIR bridge — solo)
                          │
                          ▼
               ┌──── FE5 ────┐
@@ -300,12 +328,12 @@ F1 (blocks all)
               │
               ▼
          I1 → I2 → I3 → I4
-              │
-              ▼
-         P1/P2/P4 parallel ──► P3 ──► P5 ──► P6
+              │         │
+              ▼         └──► I5 (public hosting, parallel to I3/I4)
+         P1.5 (pre-flight) → P1/P2/P4 parallel → P3 → P5 → P6
 ```
 
-Peak concurrency: **6 teammates** during Phase 1 (F2-F7) and Phase 3 (FE1-FE7). Phase 2 bottleneck is single-owner backend; consider splitting B2/B3/B4/B5 across two backend-architects if available.
+Peak concurrency: **7 teammates** during Phase 1 (F2-F9). Phase 2 bottleneck is single-owner backend; consider splitting B2/B3/B4/B5 across two backend-architects if available.
 
 ---
 
@@ -403,6 +431,7 @@ If a major risk fires (see RISK_REGISTER.md), collapse scope to the **minimum sh
 
 ## Totals
 
-- **Total estimate:** ~116 hours of single-teammate working time across all tasks.
-- **Critical path:** ~28 hours end-to-end on the longest chain.
-- **Parallel wall-clock with 5 teammates at steady state:** ~40-50 hours (parallelism isn't free; review + integration add overhead).
+- **Total estimate:** ~126 hours of single-teammate working time across all tasks (F9 +3h, F6.5 +2h, I5 +3h, P1.5 +2h = +10h over original 116h).
+- **Critical path:** ~30 hours end-to-end on the longest chain (added P1.5 rehearsal before P1 recording).
+- **Parallel wall-clock with 5 teammates at steady state:** ~42-52 hours (parallelism isn't free; review + integration add overhead).
+- **New tasks added:** F9, F6.5, I5, P1.5. **Modified tasks:** F1, B1, B6, B7, B9, B10, FE3, FE6, P1.
