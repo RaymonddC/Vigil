@@ -95,7 +95,7 @@ Associate Chief Health Informatics Officer for EHR Platform & Innovation, Childr
 **Our 3 best hooks.**
 1. **"Agentic, not dashboard."** Lead the Devpost with: "Vigil does not show you a risk number. It *escalates* — it drafts the SBAR, opens a `Communication` resource, and routes it to the covering clinician." Use his word "agentic" literally.
 2. **Demo minute 1:45 — the clinician triggers a closed-loop action on screen.** Not "here's a chart." The A2A agent returns an unpersisted SBAR draft; the clinician clicks **Approve** in the dashboard; the backend writes a `Communication` FHIR resource plus an `AuditEvent` to HAPI FHIR, and a toast confirms the write. Preserves the "no autonomous action" guarantee while still showing Proctor a real closed-loop FHIR write. This is the single highest-leverage hook for Proctor; if nothing else lands, land this.
-3. **Local-validation honesty slide.** A single slide: "Validated only on MIMIC-IV subset + synthetic bundles; CHOP-style local validation required before deployment." This directly echoes his "tested and validated locally" quote and signals we actually read him.
+3. **Local-validation honesty slide.** A single slide: "Validated on synthetic bundles generated from published clinical reference ranges (MEWT / qSOFA / CDC ASE thresholds). Retrospective MIMIC-III/IV validation and CHOP-style local prospective validation are the immediate post-hackathon steps before any deployment." This directly echoes his "tested and validated locally" quote and signals we actually read him.
 
 **Rejection triggers.**
 - "Alert dashboard" framing. Do not use the word "dashboard" in the Devpost at all.
@@ -144,7 +144,7 @@ Partner at Foreground Capital (women's health VC, formerly RH Capital). MD/MPH M
 | H8 | "Who gets paged on Monday" ops slide | | | X | X | | Devpost "How it works" |
 | H9 | Continuity-of-care OR→PACU→floor language | X | | X | | | Devpost problem section |
 | H10 | "Agentic, not dashboard" — clinician clicks Approve, backend writes `Communication` + `AuditEvent`, toast confirms | | X | | X | | Demo 1:45, Devpost headline |
-| H11 | Local-validation honesty slide (MIMIC-IV + synthetic) | X | | | X | | Demo 3:15, README caveats |
+| H11 | Local-validation honesty slide (synthetic now, MIMIC + local prospective planned) | X | | | X | | Demo 3:15, README caveats |
 | H12 | Postpartum cameo, one-ward swap | | X | | | X | Demo 3:30–4:15 |
 | H13 | CDC Adult Sepsis Event applied to postpartum, name-checked | | | | | X | `flag_sepsis_onset` postpartum path + Devpost |
 | H14 | Maternal mortality disparities stat | | | | | X | Devpost opening for Zheng path |
