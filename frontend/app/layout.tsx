@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" });
@@ -39,7 +40,7 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 h-14 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center px-6 gap-4 shadow-[0_1px_0_0_#E2E8F0]">
           {/* Logo — left */}
           <Link
-            href="/patients"
+            href="/"
             className="flex items-center gap-2 font-[family-name:var(--font-geist-sans)] font-bold text-lg text-slate-900 dark:text-slate-50 tracking-tight select-none"
             aria-label="Vigil home"
           >
@@ -103,6 +104,7 @@ export default function RootLayout({
             {children}
           </main>
         </div>
+        <Toaster position="bottom-right" richColors />
       </body>
     </html>
   );
