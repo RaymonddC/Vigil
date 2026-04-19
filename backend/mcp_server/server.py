@@ -26,6 +26,7 @@ from pydantic import Field
 
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
 from backend.mcp_server.middleware import SharpHeaderMiddleware
+from backend.mcp_server.tools import score_deterioration_risk as _b3
 from backend.mcp_server.tools import screen_vital_thresholds as _b2
 
 # ---------------------------------------------------------------------------
@@ -173,20 +174,11 @@ async def score_deterioration_risk(
     ] = "postop",
     ctx: Context | None = None,
 ) -> str:
-    """Stub — will be implemented by tool-builder."""
+    """Compute qSOFA + composite trend score for deterioration risk."""
     sharp = get_sharp_context(ctx)
     pid = resolve_patient_id(patient_id, sharp)
     logger.info("tool called", extra={"tool": "score_deterioration_risk", "patient_id": pid})
-    return json.dumps({
-        "status": "ok", "patient_id": pid,
-        "qsofa_score": 0,
-        "qsofa_components": {
-            "rr_ge_22": False, "sbp_le_100": False,
-            "altered_mental": False,
-        },
-        "composite_risk": 0.0, "risk_band": "low",
-        "rationale": "stub", "contributing_conditions": [],
-    })
+    return await _b3.run(pid, window_hours, trajectory, sharp)
 
 
 @mcp.tool(
