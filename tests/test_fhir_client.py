@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.fhir.client import FhirClient, FhirClientError, FhirContext
+from backend.fhir.client import FhirClient, FhirClientError
+from backend.schemas import FhirContext
 from backend.fhir.models import (
     Condition,
     Encounter,

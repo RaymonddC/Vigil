@@ -8,8 +8,6 @@ Reference: po-community-mcp/python/fhir_context.py, fhir_client.py
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import httpx
 
 from backend.fhir.models import (
@@ -19,17 +17,7 @@ from backend.fhir.models import (
     Observation,
     Patient,
 )
-
-
-@dataclass
-class FhirContext:
-    """FHIR server connection info, constructed from SHARP headers.
-
-    Source: po-community-mcp/python/fhir_context.py
-    """
-
-    url: str  # Base URL, e.g. "http://localhost:8080/fhir"
-    token: str | None = None  # Bearer token; None for unauth HAPI in dev
+from backend.schemas import FhirContext  # canonical definition — single source of truth
 
 
 class FhirClientError(Exception):
@@ -50,6 +38,8 @@ class FhirClient:
     """
 
     def __init__(self, context: FhirContext) -> None:
+        # SEC-01: context.url is validated against ALLOWED_FHIR_HOSTS
+        # by the SHARP header middleware (B8) before FhirClient is constructed.
         self._context = context
         self._base = context.url.rstrip("/")
         # Retry transport: retry on 5xx with exponential backoff
