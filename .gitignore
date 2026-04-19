@@ -41,6 +41,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# SQLite review queue (generated at runtime)
+backend/api/review_queue.db
+
 # Logs
 *.log
 

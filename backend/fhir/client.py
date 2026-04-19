@@ -145,3 +145,31 @@ class FhirClient:
         if not entries:
             return None
         return Encounter.model_validate(entries[0]["resource"])
+
+    async def get_all_patients(self, count: int = 50) -> list[Patient]:
+        """GET /Patient?_count={count} — list all patients in HAPI."""
+        data = await self._get("Patient", params={"_count": str(count)})
+        entries = data.get("entry", [])
+        return [Patient.model_validate(e["resource"]) for e in entries]
+
+    async def post_resource(
+        self, resource_type: str, resource: dict
+    ) -> dict:
+        """POST a FHIR resource to HAPI and return the created resource.
+
+        Used exclusively by the approve endpoint (B10) to write
+        Communication (status=completed) and AuditEvent.  This is the
+        ONLY FHIR write path in the stack.
+        """
+        url = f"{self._base}/{resource_type}"
+        resp = await self._client.post(
+            url,
+            json=resource,
+            headers={"Content-Type": "application/fhir+json"},
+        )
+        if resp.status_code >= 400:
+            raise FhirClientError(
+                f"FHIR POST {resource_type} error {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
+        return resp.json()
