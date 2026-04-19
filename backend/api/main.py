@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.api.review_queue import init_db, list_pending_alerts
+from backend.cache import get_cache_stats
 from backend.api.routes.patients import (
     approve_alert_action,
     get_latest_patient_alert_action,
@@ -317,6 +318,7 @@ async def get_status() -> dict[str, Any]:
         "agent_healthy": agent_healthy,
         "a2a_agent_url": A2A_AGENT_URL,
         "token_usage": get_token_totals(),
+        "cache": await get_cache_stats(),
         "ts": datetime.now(UTC).isoformat(),
     }
 

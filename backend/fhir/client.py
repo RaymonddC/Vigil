@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import httpx
 
+from backend.cache import fhir_cache_get, fhir_cache_key, fhir_cache_set
 from backend.fhir.models import (
     Condition,
     Encounter,
@@ -65,7 +66,16 @@ class FhirClient:
         await self._client.aclose()
 
     async def _get(self, path: str, params: dict[str, str] | None = None) -> dict:
-        """Issue a GET request and return parsed JSON."""
+        """Issue a GET request and return parsed JSON.
+
+        Checks the request-scoped FHIR cache (I4) before hitting HAPI.
+        Cache is active only inside a ``fhir_cache_scope()`` context.
+        """
+        ck = fhir_cache_key(self._base, path, params)
+        cached = fhir_cache_get(ck)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+
         url = f"{self._base}/{path}"
         resp = await self._client.get(url, params=params)
         if resp.status_code == 404:
@@ -75,7 +85,9 @@ class FhirClient:
                 f"FHIR error {resp.status_code}: {resp.text[:200]}",
                 status_code=resp.status_code,
             )
-        return resp.json()
+        result: dict = resp.json()
+        fhir_cache_set(ck, result)
+        return result
 
     async def get_patient(self, patient_id: str) -> Patient:
         """GET /Patient/{id}."""

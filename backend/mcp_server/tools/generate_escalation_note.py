@@ -17,6 +17,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from backend.cache import get_llm_cached, set_llm_cached
 from backend.fhir.client import FhirClient, FhirClientError
 from backend.llm.provider import LLMError, get_provider
 from backend.obs.metrics import record_llm_call, tool_call_timer
@@ -250,13 +251,18 @@ async def run(
             severity=severity,
         )
 
-        # Call LLM
+        # Call LLM — check cache first (I4)
         provider = get_provider()
         model_used = provider.name
         try:
-            llm_output = await provider.complete(prompt, max_tokens=1024)
+            fhir_url = sharp.url if sharp else ""
+            llm_output = await get_llm_cached(prompt, model_used, fhir_url, patient_id)
+            cache_hit = llm_output is not None
+            if llm_output is None:
+                llm_output = await provider.complete(prompt, max_tokens=1024)
+                await set_llm_cached(prompt, model_used, fhir_url, patient_id, llm_output)
             # Approximate token counts for observability
-            prompt_tokens = len(prompt) // 4
+            prompt_tokens = 0 if cache_hit else len(prompt) // 4
             completion_tokens = len(llm_output) // 4
             await record_llm_call(
                 provider=model_used.split("/")[0],
