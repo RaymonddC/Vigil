@@ -26,6 +26,7 @@ from pydantic import Field
 
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
 from backend.mcp_server.middleware import SharpHeaderMiddleware
+from backend.mcp_server.tools import screen_vital_thresholds as _b2
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -132,16 +133,11 @@ async def screen_vital_thresholds(
     ] = "postop",
     ctx: Context | None = None,
 ) -> str:
-    """Stub — will be implemented by tool-builder."""
+    """Screen vital signs against MEWT thresholds and flag breaches."""
     sharp = get_sharp_context(ctx)
     pid = resolve_patient_id(patient_id, sharp)
     logger.info("tool called", extra={"tool": "screen_vital_thresholds", "patient_id": pid})
-    return json.dumps({
-        "status": "ok", "patient_id": pid, "trajectory": trajectory,
-        "breaches": [], "scanned_count": 0,
-        "window_start": "2026-01-01T00:00:00Z",
-        "window_end": "2026-01-01T00:00:00Z",
-    })
+    return await _b2.run(pid, lookback_minutes, trajectory, sharp)
 
 
 @mcp.tool(
