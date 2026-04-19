@@ -23,6 +23,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from backend.schemas import VitalBreach  # canonical definition — single source of truth
+
 # ---------------------------------------------------------------------------
 # Threshold tables
 # ---------------------------------------------------------------------------
@@ -75,17 +77,6 @@ POSTPARTUM_THRESHOLDS: list[_Threshold] = [
 # ---------------------------------------------------------------------------
 # Output models
 # ---------------------------------------------------------------------------
-
-class VitalBreach(BaseModel):
-    """One vital that violated a MEWT threshold."""
-
-    loinc: str
-    label: str
-    value: float
-    unit: str
-    threshold: str
-    severity: Literal["yellow", "red"]
-    observed_at: datetime
 
 
 class MewtResult(BaseModel):
