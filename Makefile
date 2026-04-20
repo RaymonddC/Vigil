@@ -63,5 +63,5 @@ demo-warmup:
 
 # E2E tests (requires make demo running)
 e2e:
-	cd frontend && npx playwright install --with-deps chromium
-	cd tests/e2e && npx playwright test --config playwright.config.ts
+	cd frontend && pnpm install && npx playwright install --with-deps chromium
+	cd frontend && npx playwright test --config ../tests/e2e/playwright.config.ts
