@@ -262,8 +262,10 @@ async def agent_tick() -> dict[str, Any]:
     tick_url = f"{A2A_AGENT_URL.rstrip('/')}/tick"
     success = False
     detail = "agent not reachable"
+    # Full 10-patient cycle takes ~60-120s (4 MCP tool calls × 10 patients
+    # + LLM per patient that fires). Give the agent room to finish.
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=5.0)) as client:
             headers: dict[str, str] = {}
             if VIGIL_API_KEY:
                 headers["X-API-Key"] = VIGIL_API_KEY
