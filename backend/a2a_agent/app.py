@@ -3,17 +3,20 @@
 Builds the A2A FastAPI application serving:
 - AgentCard at GET /.well-known/agent-card.json
 - JSON-RPC endpoint at POST /a2a
+- POST /tick — runs one sentinel cycle across every seeded patient
 - Optional polling loop (POLL_INTERVAL_SEC env, default 900s, demo 30s)
 
-Reference: PROMPT_OPINION_INTEGRATION.md §3.3, BUILD_PLAN.md B7
+Reference: PROMPT_OPINION_INTEGRATION.md §3.3, BUILD_PLAN.md B7–B8
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -22,8 +25,16 @@ from a2a.types import AgentCard
 
 from backend.a2a_agent.mcp_client import VigilMcpClient
 from backend.a2a_agent.sentinel import PostopSentinelExecutor
+from backend.a2a_agent.tick import run_cycle_for_all_patients
+from backend.obs.logging import configure_logging, get_logger
+from backend.security.api_key import build_api_key_middleware, warn_if_unset
 
-logger = logging.getLogger("vigil.a2a.app")
+# ---------------------------------------------------------------------------
+# Logging — shared JSON formatter + bearer token filter (H3)
+# ---------------------------------------------------------------------------
+
+configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+logger = get_logger("vigil.a2a.app")
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -31,6 +42,7 @@ logger = logging.getLogger("vigil.a2a.app")
 
 A2A_PORT = int(os.environ.get("A2A_PORT", "9000"))
 POLL_INTERVAL_SEC = int(os.environ.get("POLL_INTERVAL_SEC", "900"))
+FHIR_BASE_URL = os.environ.get("FHIR_BASE_URL", "http://localhost:8080/fhir")
 
 # ---------------------------------------------------------------------------
 # AgentCard — load from JSON file
@@ -64,6 +76,12 @@ app_builder = A2AFastAPIApplication(
 
 app = app_builder.build()
 
+# SEC-05: API key enforcement — exempt AgentCard (public per A2A spec) (H1).
+_A2A_SKIP_PREFIXES = ("/.well-known/agent-card.json", "/docs", "/openapi.json", "/redoc")
+app.middleware("http")(build_api_key_middleware(skip_prefixes=_A2A_SKIP_PREFIXES))
+
+warn_if_unset()
+
 logger.info(
     "Vigil A2A agent configured",
     extra={
@@ -72,6 +90,80 @@ logger.info(
         "mcp_url": mcp_client._base_url,
     },
 )
+
+# ---------------------------------------------------------------------------
+# POST /tick — run a sentinel cycle across every patient in HAPI
+# ---------------------------------------------------------------------------
+
+
+@app.post("/tick")
+async def tick() -> dict[str, Any]:
+    """Run one sentinel cycle across every seeded patient.
+
+    Invoked by the proxy's ``POST /api/agent/tick`` (the "Tick Now" button
+    in FE3) and by the internal poll loop.  Triggered alerts are written to
+    the SQLite review queue via ``enqueue_alert``.
+    """
+    result = await run_cycle_for_all_patients(mcp_client, FHIR_BASE_URL)
+    result["ts"] = datetime.now(UTC).isoformat()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Background poll loop — B8
+# ---------------------------------------------------------------------------
+
+_poll_task: asyncio.Task[None] | None = None
+
+
+async def _poll_loop(interval_sec: int) -> None:
+    """Invoke the tick cycle every ``interval_sec`` seconds until cancelled."""
+    logger.info(
+        "sentinel poll loop started",
+        extra={"interval_sec": interval_sec},
+    )
+    try:
+        while True:
+            await asyncio.sleep(interval_sec)
+            try:
+                summary = await run_cycle_for_all_patients(
+                    mcp_client, FHIR_BASE_URL
+                )
+                logger.info(
+                    "poll tick complete",
+                    extra={
+                        "patients_ticked": summary.get("patients_ticked"),
+                        "alerts_generated": summary.get("alerts_generated"),
+                    },
+                )
+            except Exception:  # noqa: BLE001 — keep the loop alive
+                logger.exception("poll tick failed")
+    except asyncio.CancelledError:
+        logger.info("sentinel poll loop stopping")
+        raise
+
+
+@app.on_event("startup")
+async def _start_poll_loop() -> None:
+    global _poll_task
+    if POLL_INTERVAL_SEC <= 0:
+        logger.info("poll loop disabled (POLL_INTERVAL_SEC<=0)")
+        return
+    _poll_task = asyncio.create_task(_poll_loop(POLL_INTERVAL_SEC))
+
+
+@app.on_event("shutdown")
+async def _stop_poll_loop() -> None:
+    global _poll_task
+    if _poll_task is None:
+        return
+    _poll_task.cancel()
+    try:
+        await _poll_task
+    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        pass
+    _poll_task = None
+
 
 # ---------------------------------------------------------------------------
 # Entrypoint

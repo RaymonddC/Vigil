@@ -11,9 +11,7 @@ Reference: po-community-mcp/python/main.py, mcp_instance.py
 
 from __future__ import annotations
 
-import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
@@ -29,45 +27,15 @@ from backend.mcp_server.tools import flag_sepsis_onset as _b4
 from backend.mcp_server.tools import generate_escalation_note as _b5
 from backend.mcp_server.tools import score_deterioration_risk as _b3
 from backend.mcp_server.tools import screen_vital_thresholds as _b2
+from backend.obs.logging import configure_logging, get_logger
+from backend.security.api_key import build_api_key_middleware, warn_if_unset
 
 # ---------------------------------------------------------------------------
-# Structured JSON logging
+# Logging — shared JSON formatter + bearer token filter (H3)
 # ---------------------------------------------------------------------------
 
-
-def _setup_logging() -> None:
-    """Configure structured JSON logging for the MCP server."""
-    import json as _json
-
-    class JSONFormatter(logging.Formatter):
-        def format(self, record: logging.LogRecord) -> str:
-            log_data: dict[str, Any] = {
-                "timestamp": self.formatTime(record, self.datefmt),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-            }
-            # Merge extra fields
-            for key in ("fhir_server_url", "fhir_access_token", "patient_id",
-                        "tool", "duration_ms", "request_id", "error"):
-                val = getattr(record, key, None)
-                if val is not None:
-                    log_data[key] = val
-            if record.exc_info and record.exc_info[1]:
-                log_data["exception"] = str(record.exc_info[1])
-            return _json.dumps(log_data)
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-
-    root = logging.getLogger("vigil")
-    root.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
-    root.addHandler(handler)
-    root.propagate = False
-
-
-_setup_logging()
-logger = logging.getLogger("vigil.mcp.server")
+configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+logger = get_logger("vigil.mcp.server")
 
 # ---------------------------------------------------------------------------
 # FastMCP instance + capability patch
@@ -269,6 +237,7 @@ async def generate_escalation_note(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastMCP requires its session manager running for streamable HTTP."""
+    warn_if_unset()
     logger.info("Vigil MCP server starting", extra={"port": MCP_PORT})
     async with mcp.session_manager.run():
         logger.info("MCP session manager ready")
@@ -291,6 +260,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# SEC-05: API key enforcement — outermost layer, runs before CORS + SHARP (H1).
+_MCP_SKIP_PREFIXES = ("/health", "/docs", "/openapi.json", "/redoc")
+app.middleware("http")(build_api_key_middleware(skip_prefixes=_MCP_SKIP_PREFIXES))
 
 
 @app.get("/health")
