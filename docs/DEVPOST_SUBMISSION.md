@@ -28,7 +28,7 @@ Vigil — agentic sentinel for postop + postpartum deterioration
 
 ### Inspiration
 
-Every year, 4.2 million people die within 30 days of surgery — more than HIV, tuberculosis, and malaria combined ([Nepogodiev, *Lancet* 2019](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(18)33139-8/fulltext)). A woman dies every two minutes from obstetric complications ([WHO 2023](https://www.who.int/news/item/23-02-2023-a-woman-dies-every-two-minutes-due-to-pregnancy-or-childbirth--un-agencies)). In the US, Black women die from pregnancy-related causes at **2.6× the rate of white women**, and over 80% of those deaths are preventable ([CDC MMWR 2023](https://www.cdc.gov/mmwr/volumes/72/wr/mm7235e1.htm)). The "fourth trimester" — the 12 weeks postpartum — is when most maternal deaths happen, and it's exactly when clinical attention drops off. In both postop and postpartum, the warning signs appear 30–60 minutes before crisis. But no single vital crosses a hard threshold — the danger lives in the *pattern* across HR trend, BP trend, and nursing context. On post-surgical wards one nurse covers 6–8 patients. No human holds that multivariate pattern in their head for all of them.
+Every year, 4.2 million people die within 30 days of surgery — more than HIV, tuberculosis, and malaria combined ([Nepogodiev, *Lancet* 2019](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(18)33139-8/fulltext)). A woman dies every two minutes from obstetric complications ([WHO 2023](https://www.who.int/news/item/23-02-2023-a-woman-dies-every-two-minutes-due-to-pregnancy-or-childbirth--un-agencies)). In the US, Black women die from pregnancy-related causes at **roughly 3× the rate of white women**, and over 80% of those deaths are preventable ([CDC Pregnancy Mortality Surveillance System](https://www.cdc.gov/reproductive-health/maternal-infant-health/pregnancy-mortality-surveillance.html); [CDC "Four in 5 pregnancy-related deaths are preventable"](https://www.cdc.gov/media/releases/2022/p0919-pregnancy-related-deaths.html)). The "fourth trimester" — the 12 weeks postpartum — is when most maternal deaths happen, and it's exactly when clinical attention drops off. In both postop and postpartum, the warning signs appear 30–60 minutes before crisis. But no single vital crosses a hard threshold — the danger lives in the *pattern* across HR trend, BP trend, and nursing context. On post-surgical wards one nurse covers 6–8 patients. No human holds that multivariate pattern in their head for all of them.
 
 Current AI solutions for postoperative care show only marginal lift over traditional scoring systems like MEWS and qSOFA ([Moll, Khanna & Mathur, *Crit Care Sci* 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12266812/)). And clinicians override 70–90% of threshold-based alerts ([AHRQ PSNet](https://psnet.ahrq.gov/primer/alert-fatigue)). The problem isn't more alerts — it's better *orchestration* of existing clinical knowledge.
 
@@ -49,7 +49,7 @@ Vigil is a clinical early-warning system that monitors post-surgical and postpar
 
 **Closed-loop action, not a dashboard.** When the clinician clicks "Approve & send RRT," the backend writes a FHIR `Communication` resource (the SBAR payload) and an `AuditEvent` (the approval audit trail) to HAPI FHIR. The agent never takes autonomous action — it drafts, it waits.
 
-**Same tools, different ward.** The same four MCP tools fire on a postpartum patient (PT-009, 29F, 3 days post-C-section, lactate 4.1, WBC 18) with zero code changes. Maternal sepsis SBAR, generated the exact same way. This is the substitutability thesis applied to MCP tools: one build, many wards.
+**Same tools, different ward.** The same four MCP tools fire on a postpartum patient (PT-009, 29F, 3 days post-C-section, lactate 4.2, WBC 18) with zero code changes. Maternal sepsis SBAR, generated the exact same way. This is the substitutability thesis applied to MCP tools: one build, many wards.
 
 ### How we built it
 
@@ -101,7 +101,7 @@ python, mcp, a2a-sdk, fastapi, nextjs, react, typescript, shadcn-ui, tailwind-cs
 
 ## Try it out
 
-- **GitHub:** [link to repo]
+- **GitHub:** https://github.com/RaymonddC/Vigil
 - **Demo video:** [link to Devpost video]
 - **Live dashboard:** [Vercel URL]
 - **Agent card:** `https://<deploy>/.well-known/agent-card.json`

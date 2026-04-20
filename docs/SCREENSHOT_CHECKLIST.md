@@ -252,7 +252,7 @@ Pre-warm every URL with `curl` before taking shots so no skeleton/loading state 
 - Page heading: "Vigil on the Prompt Opinion Marketplace"
 - Two cards side by side:
   - Left: **Vigil MCP Server** — "4 Clinical Early-Warning Tools" — badges: `[MCP]` `[FHIR R4]` `[SHARP]` — "Install →" button (disabled)
-  - Right: **Vigil Postop Sentinel** — "Autonomous A2A Agent" — badges: `[A2A]` `[FHIR R4]` `[SHARP]` — "Subscribe →" button (disabled)
+  - Right: **Vigil Postop Sentinel** — "7-state A2A Agent, clinician-approved" — badges: `[A2A]` `[FHIR R4]` `[SHARP]` — "Subscribe →" button (disabled)
 - No scrollbar visible; full page fits in one shot
 
 **Annotation overlay:**

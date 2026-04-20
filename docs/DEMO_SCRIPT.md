@@ -79,7 +79,7 @@ Run through this in order. Nothing gets recorded until every box is ticked.
 | 1:40 | Review Queue page, "Approve & send RRT" button on PT-007 alert card | "One click and the backend writes a FHIR Communication plus an AuditEvent to the chart." | Button click | PROCTOR |
 | 1:45 | Sonner toast: "Communication {id} written — audit {id}" | "Closed loop — clinician approves, chart updates, audit trail captured. Agentic action, always with a human in the loop." | Toast fade | PROCTOR |
 | 1:50 | Back to patient roster, click PT-009, red "Critical" RiskBadge | "Now the part we're most proud of." | Hard cut | ZHENG |
-| 1:55 | PT-009 detail: postpartum sepsis | "PT-009. Twenty-nine years old. Three days postpartum. Lactate four point one, white count eighteen." | Red banner | ZHENG |
+| 1:55 | PT-009 detail: postpartum sepsis | "PT-009. Twenty-nine years old. Three days postpartum. Lactate four point two, white count eighteen." | Red banner | ZHENG |
 | 2:00 | Same 4 MCP tools fire, same agent | "Same four MCP tools. Same agent. Zero code changes." | Diff overlay: "0 lines changed" | MANDEL |
 | 2:05 | SBAR generates for sepsis path | "Maternal sepsis SBAR, generated the exact same way." | Text streams | HICKEY |
 | 2:10 | Stat overlay: "260K maternal deaths/year" | "Maternal mortality kills 260,000 women a year. Most from sepsis and hemorrhage." | Red stat card | ZHENG |
@@ -107,7 +107,7 @@ Now watch what happens when the pattern shifts. PT-007. Same post-op cohort. But
 
 And here's the moment a nurse actually uses. An SBAR note. Situation — Background — Assessment — Recommendation: call the rapid response team. One click — Approve — and the backend writes a FHIR Communication and an AuditEvent to the chart. Closed loop, clinician in control. Agentic action — not a dashboard, a teammate.
 
-Now the part we're most proud of. PT-009. Twenty-nine years old. Three days postpartum. Lactate four point one, white count eighteen. Same four MCP tools. Same agent. Zero code changes. Maternal sepsis SBAR, generated the exact same way. Maternal mortality kills 260,000 women a year. Most from sepsis and hemorrhage. PT-010 is a hemorrhage case — same pipeline, same escalation.
+Now the part we're most proud of. PT-009. Twenty-nine years old. Three days postpartum. Lactate four point two, white count eighteen. Same four MCP tools. Same agent. Zero code changes. Maternal sepsis SBAR, generated the exact same way. Maternal mortality kills 260,000 women a year. Most from sepsis and hemorrhage. PT-010 is a hemorrhage case — same pipeline, same escalation.
 
 Because these are MCP tools, both care paths ship as one registry entry. Post-op watch. Postpartum watch. Any hospital running SMART-on-FHIR can install either path in minutes. Four tools. One agent. Unlimited clinical pathways.
 

@@ -151,7 +151,7 @@ Served at `GET /.well-known/agent-card.json`.
   "protocol_version": "0.2",
   "provider": {
     "organization": "Team Vigil (Agents Assemble 2026)",
-    "url": "https://github.com/raymond/vigil"
+    "url": "https://github.com/RaymonddC/Vigil"
   },
   "capabilities": {
     "streaming": true,

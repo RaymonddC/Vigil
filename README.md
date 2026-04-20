@@ -1,6 +1,6 @@
 # Vigil
 
-[![tests](https://img.shields.io/badge/tests-69_passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-312_passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](#tech-stack)
 [![license](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4-orange?logo=data:image/svg+xml;base64,)](#fhir-r4-resources)
@@ -163,7 +163,7 @@ No custom extensions. Every resource is vanilla FHIR R4.
 | SpO2 | `59408-5` | `%` |
 | Body temperature | `8310-5` | `Cel` |
 | Lactate | `2524-7` | `mmol/L` |
-| WBC | `6690-2` | `10*3/uL` |
+| WBC | `63120-2` | `10*3/uL` |
 | Creatinine | `2160-0` | `mg/dL` |
 | Bilirubin (total) | `1975-2` | `mg/dL` |
 | Platelet count | `777-3` | `10*3/uL` |
@@ -284,7 +284,7 @@ Set `LLM_PROVIDER=claude` before recording the demo video. Development default i
 | `make demo` | Full orchestrated startup with health checks |
 | `make demo-stop` | Tear down all services |
 | `make demo-warmup` | Pre-flight: reseed HAPI, ping LLM, tick agent, warm routes |
-| `make test` | Run pytest (69 tests) |
+| `make test` | Run pytest (312 tests) |
 | `make lint` | Ruff + mypy |
 | `make e2e` | Playwright smoke tests (requires demo running) |
 
@@ -309,7 +309,7 @@ data/                 # Synthetic FHIR bundles (10 patients × 4 trajectories)
 docs/                 # Planning set + submission copy
   img/                # Screenshots (populated by screenshot-curator)
 scripts/              # demo.sh, seed_patients.sh, tunnel scripts
-tests/                # 13 test files, 69 tests, ~4.4K LOC
+tests/                # 13 test files, 312 tests, ~4.4K LOC
   integration/        # Full MCP tool chain tests
   e2e/                # Playwright smoke tests
 ```
@@ -383,7 +383,7 @@ uv sync
 cd frontend && pnpm install
 
 # Run tests before submitting
-make test        # 69 pytest tests
+make test        # 312 pytest tests
 make lint        # ruff + mypy
 make e2e         # playwright (requires make demo running)
 
