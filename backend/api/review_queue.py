@@ -59,12 +59,17 @@ def init_db() -> None:
                 communication_draft_json TEXT NOT NULL,
                 status                  TEXT NOT NULL DEFAULT 'in-progress',
                 created_at              TEXT NOT NULL,
+                updated_at              TEXT,
                 acknowledged_at         TEXT,
                 clinician_id            TEXT,
                 note                    TEXT,
                 audit_id                TEXT
             )
         """)
+        try:
+            con.execute("ALTER TABLE alerts ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists in an older DB
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_alerts_patient ON alerts(patient_id)"
         )
@@ -117,6 +122,45 @@ def enqueue_alert(
     return alert_id
 
 
+def claim_alert_for_writing(alert_id: str) -> dict[str, Any] | None:
+    """Atomically transition status 'in-progress' → 'in-progress-writing'.
+
+    Returns the claimed row if this thread won the race; returns None if the
+    alert is not found, already completed, or another thread already claimed it
+    (caller should return 409 Conflict).
+
+    SQLite's row-level locking ensures only one UPDATE wins when two threads
+    race on the same alert_id.
+    """
+    now = datetime.now(UTC).isoformat()
+    with _conn() as con:
+        cursor = con.execute(
+            """
+            UPDATE alerts
+            SET status = 'in-progress-writing', updated_at = ?
+            WHERE id = ? AND status = 'in-progress'
+            RETURNING *
+            """,
+            (now, alert_id),
+        )
+        row = cursor.fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def revert_alert_to_in_progress(alert_id: str) -> None:
+    """Revert 'in-progress-writing' → 'in-progress' after a HAPI write failure.
+
+    Allows the next approve attempt to retry rather than leaving the alert
+    permanently locked.
+    """
+    now = datetime.now(UTC).isoformat()
+    with _conn() as con:
+        con.execute(
+            "UPDATE alerts SET status = 'in-progress', updated_at = ? WHERE id = ?",
+            (now, alert_id),
+        )
+
+
 def approve_alert(
     alert_id: str,
     clinician_id: str,
@@ -136,10 +180,11 @@ def approve_alert(
                 acknowledged_at = ?,
                 clinician_id = ?,
                 note = ?,
-                audit_id = ?
+                audit_id = ?,
+                updated_at = ?
             WHERE id = ?
             """,
-            (now, clinician_id, note, audit_id, alert_id),
+            (now, clinician_id, note, audit_id, now, alert_id),
         )
     return get_alert(alert_id)
 

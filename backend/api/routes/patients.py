@@ -14,12 +14,16 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from fastapi import HTTPException
+
 from backend.api.review_queue import (
     approve_alert,
+    claim_alert_for_writing,
     count_unread_alerts,
     get_alert,
     get_latest_alert,
     get_latest_alert_at,
+    revert_alert_to_in_progress,
 )
 from backend.fhir.client import FhirClient, FhirClientError
 from backend.obs.logging import get_logger
@@ -252,9 +256,14 @@ async def approve_alert_action(
     deployment requires OIDC-based identity verification. See SEC-08 in
     SECURITY_REVIEW.md.
     """
-    alert = await asyncio.to_thread(get_alert, alert_id)
-    if not alert:
-        return None  # caller raises 404
+    # Atomic claim: transition 'in-progress' → 'in-progress-writing'.
+    # If another coroutine already claimed the row, rows_affected = 0 → None → 409.
+    alert = await asyncio.to_thread(claim_alert_for_writing, alert_id)
+    if alert is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent approve in progress or alert already approved",
+        )
 
     ctx = _make_fhir_context(fhir_base_url)
     now = datetime.now(UTC)
@@ -265,9 +274,13 @@ async def approve_alert_action(
     comm_draft["sent"] = now.isoformat()
     comm_draft.pop("id", None)  # HAPI assigns the id
 
-    # POST Communication → HAPI
-    async with FhirClient(ctx) as client:
-        comm_response = await client.post_resource("Communication", comm_draft)
+    # POST Communication → HAPI; revert lock on failure so a retry can proceed
+    try:
+        async with FhirClient(ctx) as client:
+            comm_response = await client.post_resource("Communication", comm_draft)
+    except FhirClientError:
+        await asyncio.to_thread(revert_alert_to_in_progress, alert_id)
+        raise
 
     comm_id = comm_response.get("id", f"comm-{uuid.uuid4().hex[:8]}")
 
