@@ -13,10 +13,8 @@ context manager so tests don't require a running asyncio event store.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from backend.fhir.client import FhirClientError
 from backend.fhir.models import (
@@ -35,7 +33,7 @@ from backend.schemas import FhirContext, SepsisFlagOutput
 # ---------------------------------------------------------------------------
 
 FHIR_CTX = FhirContext(url="http://localhost:8080/fhir", token=None)
-T4H = datetime(2026, 4, 15, 10, 0, 0, tzinfo=timezone.utc)
+T4H = datetime(2026, 4, 15, 10, 0, 0, tzinfo=UTC)
 
 
 @asynccontextmanager

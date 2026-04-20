@@ -44,7 +44,7 @@ import os
 import time
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from backend.obs.logging import get_logger

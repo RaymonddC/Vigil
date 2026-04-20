@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from backend.fhir.client import FhirClientError
 from backend.fhir.models import (
@@ -28,9 +26,9 @@ from backend.fhir.models import (
     Patient,
     Period,
 )
-from backend.llm.provider import LLMError, StubProvider
+from backend.llm.provider import LLMError
 from backend.mcp_server.tools.generate_escalation_note import run
-from backend.schemas import EscalationOutput, FhirContext, SBAR
+from backend.schemas import SBAR, EscalationOutput, FhirContext
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -95,7 +93,8 @@ VITALS_OK = {
 }
 RISK_LOW = {
     "status": "ok", "patient_id": "PT-001",
-    "qsofa_score": 0, "qsofa_components": {"rr_ge_22": False, "sbp_le_100": False, "altered_mental": False},
+    "qsofa_score": 0,
+    "qsofa_components": {"rr_ge_22": False, "sbp_le_100": False, "altered_mental": False},
     "composite_risk": 0.08, "risk_band": "low",
     "rationale": "qSOFA=0; no breach.", "contributing_conditions": [],
 }
@@ -125,7 +124,7 @@ def _mock_fhir_client(patient_name: str = "Jane Doe", enc_id: str = "enc-77"):
     encounter = Encounter(
         id=enc_id,
         status="in-progress",
-        period=Period(start=datetime(2026, 4, 14, 17, 30, tzinfo=timezone.utc)),
+        period=Period(start=datetime(2026, 4, 14, 17, 30, tzinfo=UTC)),
     )
     mock_client.get_patient.return_value = patient
     mock_client.get_encounter.return_value = encounter

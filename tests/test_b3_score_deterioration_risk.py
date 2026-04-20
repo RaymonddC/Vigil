@@ -23,8 +23,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from backend.fhir.client import FhirClientError
 from backend.fhir.models import (
     CategoryItem,
@@ -54,7 +52,9 @@ def _obs(loinc: str, value: float, unit: str, t: datetime) -> Observation:
     )
 
 
-def _vitals_at(t: datetime, sbp: float, hr: float, rr: float, spo2: float = 98.0) -> list[Observation]:
+def _vitals_at(
+    t: datetime, sbp: float, hr: float, rr: float, spo2: float = 98.0
+) -> list[Observation]:
     return [
         _obs("8480-6", sbp,  "mm[Hg]", t),
         _obs("8867-4", hr,   "/min",   t),

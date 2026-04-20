@@ -117,7 +117,7 @@ class TestB2AcceptanceCriteria:
         assert "SBP" in trend_breaches[0]["threshold"]
 
     async def test_pt009_t4h_absolute_thresholds_triggered(self):
-        """PT-009 T+4h: SBP 94 (<100 yellow), HR 118 (>110 yellow), RR 24 (>=22 yellow), Temp 38.8 (>38 yellow) → TRIGGERED.
+        """PT-009 T+4h absolute thresholds: SBP 94, HR 118, RR 24, Temp 38.8 → TRIGGERED.
 
         Expects at minimum SBP and HR absolute threshold breaches.
         """

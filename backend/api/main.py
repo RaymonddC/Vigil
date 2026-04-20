@@ -27,13 +27,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.api.review_queue import init_db, list_pending_alerts
-from backend.cache import get_cache_stats
 from backend.api.routes.patients import (
     approve_alert_action,
     get_latest_patient_alert_action,
     get_patient_detail_action,
     list_patients_action,
 )
+from backend.cache import get_cache_stats
 from backend.fhir.client import FhirClientError
 from backend.obs.logging import configure_logging, get_logger, set_request_id
 from backend.obs.metrics import append_event, get_events_since, get_token_totals

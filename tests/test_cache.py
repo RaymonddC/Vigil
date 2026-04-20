@@ -12,7 +12,6 @@ Tests:
 
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
@@ -27,7 +26,6 @@ from backend.cache import (
     invalidate_llm_provider,
     set_llm_cached,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
