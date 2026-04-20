@@ -8,6 +8,7 @@ Reference: PROMPT_OPINION_INTEGRATION.md §3.4, BUILD_PLAN.md B7
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -63,7 +64,8 @@ class VigilMcpClient:
         """
         headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            # MCP Streamable HTTP spec requires clients accept both
+            "Accept": "application/json, text/event-stream",
         }
         if sharp_headers:
             headers.update(sharp_headers)
@@ -106,7 +108,27 @@ class VigilMcpClient:
                         status_code=resp.status_code,
                     )
 
-                result = resp.json()
+                # MCP Streamable HTTP can respond with either application/json
+                # or text/event-stream (SSE). Parse both.
+                content_type = resp.headers.get("content-type", "")
+                if "text/event-stream" in content_type:
+                    # SSE frames look like: "event: message\ndata: {json}\n\n".
+                    # Take the first `data:` line that parses as JSON.
+                    result = None
+                    for line in resp.text.splitlines():
+                        if line.startswith("data: "):
+                            try:
+                                result = json.loads(line[6:])
+                                break
+                            except json.JSONDecodeError:
+                                continue
+                    if result is None:
+                        raise McpClientError(
+                            tool_name,
+                            f"No valid data frame in SSE response: {resp.text[:200]}",
+                        )
+                else:
+                    result = resp.json()
                 logger.info(
                     "MCP tool call completed",
                     extra={

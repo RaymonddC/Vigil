@@ -26,26 +26,32 @@ import time
 from pathlib import Path
 from typing import Any
 
-# ── Time constants (all relative to procedure/encounter day 2026-04-15) ────────
-_D = "2026-04-15T"
-ENC_START    = f"{_D}08:00:00Z"
-PROC_TIME    = f"{_D}09:30:00Z"   # approximate procedure performed time
-PREOP_M30    = f"{_D}09:30:00Z"   # T-0:30 prophylaxis
-PREOP_M15    = f"{_D}09:45:00Z"   # T-0:15 prophylaxis
+# ── Time constants (anchored to "now" so MCP lookback windows find the data) ──
+# The most recent datapoint (T+8h) is placed ~5 min ago so seeding + first
+# MCP call always falls inside the 4h/6h windows used by the rule tools.
+from datetime import datetime, timedelta, timezone as _tz
+_NOW = datetime.now(_tz.utc).replace(microsecond=0)
+_T0_DT = _NOW - timedelta(hours=8)   # T+0 is 8 hours ago; T+8 is now
+_Z = lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+
+ENC_START    = _Z(_T0_DT - timedelta(hours=2))   # encounter started 2h before T0
+PROC_TIME    = _Z(_T0_DT - timedelta(minutes=30))  # procedure at T-0:30
+PREOP_M30    = _Z(_T0_DT - timedelta(minutes=30))
+PREOP_M15    = _Z(_T0_DT - timedelta(minutes=15))
 
 TP_TIMES: dict[str, str] = {
-    "T0": f"{_D}10:00:00Z",
-    "T1": f"{_D}11:00:00Z",
-    "T2": f"{_D}12:00:00Z",
-    "T4": f"{_D}14:00:00Z",
-    "T6": f"{_D}16:00:00Z",
-    "T8": f"{_D}18:00:00Z",
+    "T0": _Z(_T0_DT),
+    "T1": _Z(_T0_DT + timedelta(hours=1)),
+    "T2": _Z(_T0_DT + timedelta(hours=2)),
+    "T4": _Z(_T0_DT + timedelta(hours=4)),
+    "T6": _Z(_T0_DT + timedelta(hours=6)),
+    "T8": _Z(_T0_DT + timedelta(hours=8)),
 }
 TP_ORDER = ["T0", "T1", "T2", "T4", "T6", "T8"]
 LAB_TPS  = ["T0", "T4", "T8"]
 
-POST_ONSET_PT008 = f"{_D}14:15:00Z"  # Pip-tazo after sepsis onset
-POST_ONSET_PT009 = f"{_D}14:20:00Z"  # Ampi-sulbactam after sepsis onset
+POST_ONSET_PT008 = _Z(_T0_DT + timedelta(hours=4, minutes=15))  # Pip-tazo after sepsis onset
+POST_ONSET_PT009 = _Z(_T0_DT + timedelta(hours=4, minutes=20))  # Ampi-sulbactam after sepsis onset
 
 # ── Vital sign tables (§2.1–2.4) ───────────────────────────────────────────────
 # Keys: SBP, DBP, HR, RR, SpO2, Temp, Urine  (+EBL for PT-010)
