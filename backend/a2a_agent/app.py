@@ -12,6 +12,7 @@ Reference: PROMPT_OPINION_INTEGRATION.md §3.3, BUILD_PLAN.md B7–B8
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from datetime import UTC, datetime
@@ -158,10 +159,8 @@ async def _stop_poll_loop() -> None:
     if _poll_task is None:
         return
     _poll_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError, Exception):
         await _poll_task
-    except (asyncio.CancelledError, Exception):  # noqa: BLE001
-        pass
     _poll_task = None
 
 

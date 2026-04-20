@@ -15,6 +15,7 @@ managed database with encryption at rest.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import uuid
@@ -66,10 +67,9 @@ def init_db() -> None:
                 audit_id                TEXT
             )
         """)
-        try:
+        # column may already exist in an older DB
+        with contextlib.suppress(sqlite3.OperationalError):
             con.execute("ALTER TABLE alerts ADD COLUMN updated_at TEXT")
-        except sqlite3.OperationalError:
-            pass  # column already exists in an older DB
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_alerts_patient ON alerts(patient_id)"
         )

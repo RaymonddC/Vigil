@@ -11,7 +11,7 @@ down:
 	docker compose down
 
 seed:
-	python data/seed_hapi.py --fhir-base http://localhost:8080/fhir --src data/patients
+	uv run python data/seed_hapi.py --fhir-base http://localhost:8080/fhir --src data/patients
 
 # Backend
 mcp:

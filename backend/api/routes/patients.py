@@ -20,7 +20,6 @@ from backend.api.review_queue import (
     approve_alert,
     claim_alert_for_writing,
     count_unread_alerts,
-    get_alert,
     get_latest_alert,
     get_latest_alert_at,
     revert_alert_to_in_progress,
@@ -75,6 +74,35 @@ def _mrn(patient: Any) -> str:
     return patient.id or ""
 
 
+# Obstetric SNOMED codes that mark a patient as postpartum.
+# Cesarean section (11466000), normal delivery (3950001),
+# pre-eclampsia (398254007), chorioamnionitis (11612004),
+# placenta accreta (58532003), previous cesarean (200737006).
+_POSTPARTUM_SNOMED: frozenset[str] = frozenset(
+    {
+        "11466000",
+        "3950001",
+        "398254007",
+        "11612004",
+        "58532003",
+        "200737006",
+    }
+)
+
+
+def _derive_trajectory(conditions: list[Any]) -> str:
+    """Return ``postpartum`` if any condition carries an obstetric code,
+    otherwise ``postop``. Per FRONTEND_SPEC §3.1 and PROJECT_BRIEF §2.
+    """
+    for cond in conditions:
+        if not cond.code:
+            continue
+        for coding in cond.code.coding:
+            if coding.code and coding.code in _POSTPARTUM_SNOMED:
+                return "postpartum"
+    return "postop"
+
+
 # ---------------------------------------------------------------------------
 # list_patients
 # ---------------------------------------------------------------------------
@@ -85,21 +113,28 @@ async def list_patients_action(fhir_base_url: str) -> dict[str, Any]:
     ctx = _make_fhir_context(fhir_base_url)
     async with FhirClient(ctx) as client:
         patients = await client.get_all_patients()
+        condition_lists = await asyncio.gather(
+            *(client.get_conditions(p.id or "") for p in patients),
+            return_exceptions=True,
+        )
 
     rows = []
-    for p in patients:
+    for p, conds in zip(patients, condition_lists, strict=True):
         pid = p.id or ""
         latest_alert = await asyncio.to_thread(get_latest_alert, pid)
         unread = await asyncio.to_thread(count_unread_alerts, pid)
         latest_at = await asyncio.to_thread(get_latest_alert_at, pid)
         severity = latest_alert.get("severity") if latest_alert else None
+        trajectory = (
+            _derive_trajectory(conds) if isinstance(conds, list) else "postop"
+        )
         rows.append(
             {
                 "id": pid,
                 "mrn": _mrn(p),
                 "name": _patient_display_name(p),
                 "age": _patient_age(p.birthDate),
-                "trajectory": "postop",
+                "trajectory": trajectory,
                 "latest_risk_band": _severity_to_risk_band(severity),
                 "latest_alert_at": latest_at,
                 "unread_alerts": unread,
@@ -206,6 +241,7 @@ async def get_patient_detail_action(
             "age": _patient_age(patient.birthDate),
             "birth_date": patient.birthDate,
             "gender": patient.gender,
+            "trajectory": _derive_trajectory(conditions),
         },
         "encounter": encounter_out,
         "vitals_timeseries": list(series.values()),

@@ -8,7 +8,7 @@ for the winner only; the loser returns 409 before touching HAPI).
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,7 +16,6 @@ from httpx import ASGITransport, AsyncClient
 import backend.api.review_queue as rq
 from backend.api.main import app
 from backend.api.review_queue import claim_alert_for_writing, enqueue_alert
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

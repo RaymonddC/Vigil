@@ -19,7 +19,6 @@ from httpx import ASGITransport, AsyncClient
 from backend.obs.logging import _BearerTokenFilter
 from backend.security.api_key import build_api_key_middleware
 
-
 # ---------------------------------------------------------------------------
 # Test app factory
 # ---------------------------------------------------------------------------

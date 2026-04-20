@@ -13,6 +13,7 @@ Reference: BUILD_PLAN.md B7, API_CONTRACTS.md §3–§4,
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -34,6 +35,7 @@ from backend.a2a_agent.fhir_hook import (
     fhir_metadata_to_sharp_headers,
 )
 from backend.a2a_agent.mcp_client import McpClientError, VigilMcpClient
+from backend.api.review_queue import enqueue_alert
 from backend.schemas import AgentState
 
 logger = logging.getLogger("vigil.a2a.sentinel")
@@ -209,29 +211,38 @@ class PostopSentinelExecutor(AgentExecutor):
                 },
                 sharp_headers=sharp_headers,
             )
+            escalation_data = _unwrap_tool_result(escalation_result)
             logger.info(
                 "Escalation note generated",
                 extra={
                     "patient_id": patient_id,
-                    "severity": _safe_get(escalation_result, "severity"),
-                    "model_used": _safe_get(
-                        escalation_result, "model_used"
-                    ),
+                    "severity": escalation_data.get("severity"),
+                    "model_used": escalation_data.get("model_used"),
                 },
             )
 
-            # --- AWAITING_REVIEW ---
+            # --- AWAITING_REVIEW — persist SBAR draft to review queue ---
             state = AgentState.AWAITING_REVIEW
-            narrative = _safe_get(escalation_result, "narrative") or ""
-            severity = _safe_get(escalation_result, "severity") or "info"
+            severity = escalation_data.get("severity") or "info"
+            narrative = escalation_data.get("narrative") or ""
+            sbar = escalation_data.get("sbar") or {}
+            communication_draft = (
+                escalation_data.get("communication_draft") or {}
+            )
+            model_used = escalation_data.get("model_used") or "unknown"
+            resolved_recipient = escalation_data.get("recipient_role") or (
+                "rapid_response" if sepsis_triggered else "charge_nurse"
+            )
 
-            summary = (
-                f"[{state}] ALERT for {patient_id} "
-                f"(severity={severity}). "
-                "Draft posted to review queue. "
-                "Agent does NOT write to FHIR — "
-                "awaiting clinician approval.\n\n"
-                f"{narrative}"
+            alert_id = await asyncio.to_thread(
+                enqueue_alert,
+                patient_id,
+                severity,
+                sbar,
+                narrative,
+                resolved_recipient,
+                model_used,
+                communication_draft,
             )
 
             logger.info(
@@ -240,7 +251,17 @@ class PostopSentinelExecutor(AgentExecutor):
                     "patient_id": patient_id,
                     "severity": severity,
                     "state": state,
+                    "alert_id": alert_id,
                 },
+            )
+
+            summary = (
+                f"[{state}] ALERT {alert_id} for {patient_id} "
+                f"(severity={severity}). "
+                "Draft posted to review queue. "
+                "Agent does NOT write to FHIR — "
+                "awaiting clinician approval.\n\n"
+                f"{narrative}"
             )
 
             await self._emit_status(
@@ -248,6 +269,11 @@ class PostopSentinelExecutor(AgentExecutor):
                 TaskState.completed,
                 summary,
                 final=True,
+                metadata={
+                    "alert_id": alert_id,
+                    "patient_id": patient_id,
+                    "severity": severity,
+                },
             )
 
         except McpClientError as e:
@@ -304,32 +330,67 @@ class PostopSentinelExecutor(AgentExecutor):
         state: TaskState,
         text: str,
         final: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Emit a Task event with a status message."""
+        message_kwargs: dict[str, Any] = {
+            "message_id": str(uuid.uuid4()),
+            "role": Role.agent,
+            "parts": [TextPart(text=text)],
+        }
+        if metadata:
+            message_kwargs["metadata"] = metadata
         task = Task(
             id=task_id,
             context_id=context_id,
             status=TaskStatus(
                 state=state,
-                message=Message(
-                    message_id=str(uuid.uuid4()),
-                    role=Role.agent,
-                    parts=[TextPart(text=text)],
-                ),
+                message=Message(**message_kwargs),
             ),
         )
         await event_queue.enqueue_event(task)
 
 
 def _safe_get(data: Any, key: str) -> Any:
-    """Safely get a key from a dict-like result (may be nested JSON)."""
-    if isinstance(data, dict):
-        return data.get(key)
+    """Safely get a key from a dict-like MCP tool result (may be nested JSON).
+
+    Handles three shapes returned by ``VigilMcpClient.call_tool``:
+      1. a parsed dict whose keys are the tool output directly,
+      2. a JSON string with the tool output,
+      3. an MCP ``tools/call`` result wrapping the JSON in
+         ``content[0].text``.
+    """
+    unwrapped = _unwrap_tool_result(data)
+    if isinstance(unwrapped, dict):
+        return unwrapped.get(key)
+    return None
+
+
+def _unwrap_tool_result(data: Any) -> dict[str, Any]:
+    """Normalise an MCP tool result to a plain dict.
+
+    ``VigilMcpClient.call_tool`` returns the JSON-RPC ``result`` field as-is.
+    FastMCP wraps tool output in ``{"content": [{"type": "text",
+    "text": "<json>"}], "isError": false}``; older callers may also see
+    raw dicts or JSON strings.  Returns an empty dict when parsing fails.
+    """
+    if data is None:
+        return {}
     if isinstance(data, str):
         try:
             parsed = json.loads(data)
-            if isinstance(parsed, dict):
-                return parsed.get(key)
         except (json.JSONDecodeError, TypeError):
-            pass
-    return None
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    if isinstance(data, dict):
+        content = data.get("content")
+        if isinstance(content, list) and content:
+            first = content[0]
+            if isinstance(first, dict) and isinstance(first.get("text"), str):
+                try:
+                    parsed = json.loads(first["text"])
+                except (json.JSONDecodeError, TypeError):
+                    return {}
+                return parsed if isinstance(parsed, dict) else {}
+        return data
+    return {}
