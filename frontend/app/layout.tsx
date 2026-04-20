@@ -19,10 +19,11 @@ export const metadata: Metadata = {
 };
 
 const NAV_LINKS = [
-  { href: "/patients", label: "Patients" },
-  { href: "/timeline", label: "Timeline" },
-  { href: "/alerts",   label: "Alerts" },
-  { href: "/settings", label: "Settings" },
+  { href: "/patients",    label: "Patients" },
+  { href: "/timeline",    label: "Timeline" },
+  { href: "/alerts",      label: "Alerts" },
+  { href: "/marketplace", label: "Marketplace" },
+  { href: "/settings",    label: "Settings" },
 ];
 
 export default function RootLayout({
