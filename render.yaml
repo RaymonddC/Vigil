@@ -1,0 +1,155 @@
+# Vigil — Render.com Blueprint (free tier, fixture-mode deploy)
+#
+# Deploys 4 web services from one Dockerfile using the SERVICE env var.
+# All services run on Render's free plan (750 workspace-hours/month — shared).
+# The FHIR fixture replaces HAPI here: HAPI needs >512 MB RAM, the fixture
+# server runs in ~50 MB and serves the same synthetic PT-* bundles.
+#
+# --------------------------------------------------------------------------
+# Quickstart:
+#   1. Fork/connect the repo in the Render dashboard.
+#   2. Create a new Blueprint pointing at this file.
+#   3. Fill in the `sync: false` secrets when prompted.
+#   4. After first deploy, set A2A_PUBLIC_URL on vigil-a2a to the live URL
+#      Render assigned (see deploy/render/README.md for details).
+#   5. Wire UptimeRobot monitors so the services stay warm during judging.
+# --------------------------------------------------------------------------
+#
+# Inter-service addressing uses Render's private network: each web service
+# is reachable from its workspace peers at http://<service-name>:<port>,
+# so no public-URL substitution is needed for MCP → fixture or A2A → MCP.
+# A2A_PUBLIC_URL must be a public URL because it lands in the AgentCard
+# that Prompt Opinion and external clients fetch over the internet.
+
+services:
+  # -----------------------------------------------------------------------
+  # 1. FHIR fixture server — HAPI replacement for free tier
+  #    Serves synthetic PT-*.json bundles in HAPI-compatible search shapes.
+  #    Internal-use only, but Render's free tier has no private-service
+  #    type — so this is a public web service gated by header checks the
+  #    callers (vigil-mcp, vigil-a2a, vigil-api) attach.
+  # -----------------------------------------------------------------------
+  - type: web
+    name: vigil-fhir
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /fhir/metadata
+    autoDeploy: true
+    envVars:
+      - key: SERVICE
+        value: fixture
+      - key: FIXTURE_PORT
+        value: "8080"
+      - key: LOG_LEVEL
+        value: INFO
+
+  # -----------------------------------------------------------------------
+  # 2. MCP server — the 4 clinical tools. Public endpoint + API key.
+  # -----------------------------------------------------------------------
+  - type: web
+    name: vigil-mcp
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: SERVICE
+        value: mcp
+      - key: MCP_PORT
+        value: "7001"
+      - key: LLM_PROVIDER
+        value: groq
+      - key: FHIR_BASE_URL
+        value: http://vigil-fhir:8080/fhir
+      - key: ALLOWED_FHIR_HOSTS
+        value: http://vigil-fhir:8080/fhir,http://localhost:8080/fhir
+      - key: CORS_ORIGINS
+        value: https://vigil-frontend.vercel.app,http://localhost:3000
+      - key: CACHE_TTL_SEC
+        value: "300"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: VIGIL_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # -----------------------------------------------------------------------
+  # 3. A2A agent — AgentCard at /.well-known/agent-card.json + JSON-RPC.
+  #    A2A_PUBLIC_URL is sync:false because the first deploy decides the
+  #    final https://vigil-a2a*.onrender.com hostname (collision suffix).
+  # -----------------------------------------------------------------------
+  - type: web
+    name: vigil-a2a
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /.well-known/agent-card.json
+    autoDeploy: true
+    envVars:
+      - key: SERVICE
+        value: a2a
+      - key: A2A_PORT
+        value: "9000"
+      - key: LLM_PROVIDER
+        value: groq
+      - key: MCP_BASE_URL
+        value: http://vigil-mcp:7001
+      - key: FHIR_BASE_URL
+        value: http://vigil-fhir:8080/fhir
+      - key: POLL_INTERVAL_SEC
+        value: "900"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: A2A_PUBLIC_URL
+        sync: false
+      - key: VIGIL_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # -----------------------------------------------------------------------
+  # 4. FastAPI proxy — dashboard API + /approve (FHIR write path).
+  # -----------------------------------------------------------------------
+  - type: web
+    name: vigil-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: SERVICE
+        value: api
+      - key: API_PORT
+        value: "8000"
+      - key: LLM_PROVIDER
+        value: groq
+      - key: FHIR_BASE_URL
+        value: http://vigil-fhir:8080/fhir
+      - key: A2A_AGENT_URL
+        value: http://vigil-a2a:9000
+      - key: CORS_ORIGINS
+        value: https://vigil-frontend.vercel.app,http://localhost:3000
+      - key: LOG_LEVEL
+        value: INFO
+      - key: VIGIL_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

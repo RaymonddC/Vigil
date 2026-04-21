@@ -19,6 +19,14 @@ network** (cloud) — never behind a public route or tunnel.
 
 ---
 
+**Which option should I pick?**
+
+- Free, no credit card, permanent URL → **Option E (Render.com, fixture mode)**. Recommended for most hackathon teams.
+- Need HAPI persistence and willing to spend ~$10/mo → Option D (GCP Cloud Run) or Option B (Fly.io).
+- Laptop-local demo only → Option A (tunnel).
+
+---
+
 ## Option A — Tunnel (recommended for demo day)
 
 Fastest, zero infrastructure. Run everything locally; expose three services
@@ -232,6 +240,40 @@ on the shared VPC connector can invoke it.
 
 Options B (GKE Autopilot) and C (single GCE VM) are documented briefly at
 the bottom of `deploy/gcp/README.md` as fallbacks if Cloud Run hits a limit.
+
+---
+
+## Option E — Render.com (free, fixture mode) — **recommended for free hosting**
+
+All four services on Render's free plan using a lightweight FHIR fixture
+server in place of HAPI. Zero credit card, permanent `*.onrender.com` URLs,
+fits in 512 MB per service. Trade-off is read-only FHIR (the fixture does
+not persist writes), which is fine for judging.
+
+Configs live under `deploy/render/`:
+
+- [`render.yaml`](../render.yaml) at the repo root — Blueprint for all 4 services.
+- [`deploy/render/README.md`](../deploy/render/README.md) — full runbook: Blueprint vs dashboard deploy, UptimeRobot keep-alive, Vercel frontend, free-tier math.
+
+Service map on Render:
+
+| Service | Render URL | Role |
+|---|---|---|
+| `vigil-fhir` | `https://vigil-fhir-*.onrender.com` | Fixture FHIR store (HAPI replacement) |
+| `vigil-mcp`  | `https://vigil-mcp-*.onrender.com`  | MCP tools — PO calls this |
+| `vigil-a2a`  | `https://vigil-a2a-*.onrender.com`  | AgentCard + A2A JSON-RPC |
+| `vigil-api`  | `https://vigil-api-*.onrender.com`  | FastAPI proxy — dashboard backend |
+
+Key free-tier constraints (see `deploy/render/README.md` for the full
+breakdown):
+
+- **750 instance-hours/month per workspace**, shared across all free
+  services — cannot keep 4 services warm 24/7 for an entire month on free.
+  Recommended posture: deploy now, enable UptimeRobot keep-alive on
+  2026-05-07 through submission (2026-05-11), then pause.
+- Services sleep after 15 min idle; cold start is ~60 s. UptimeRobot (free)
+  keeps them warm during the demo window.
+- Frontend deploys to Vercel, not Render (Vercel is a better Next.js host).
 
 ---
 
