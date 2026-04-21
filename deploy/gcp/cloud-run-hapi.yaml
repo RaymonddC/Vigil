@@ -1,0 +1,98 @@
+# Cloud Run — HAPI FHIR (vigil-hapi) — INTERNAL ONLY (SEC-10)
+#
+# Deploy:
+#   gcloud run services replace deploy/gcp/cloud-run-hapi.yaml \
+#     --region=us-central1 --project=$PROJECT_ID
+#
+# ingress=internal means HAPI is reachable only from other Cloud Run services
+# in the same project (via the VPC connector). It is NEVER publicly routable.
+# This satisfies SEC-10: HAPI audit events cannot be tampered from the internet.
+#
+# Data: Cloud SQL Postgres 15 attached via private IP (VPC connector).
+# Create it once with:
+#   gcloud sql instances create vigil-hapi-db \
+#     --region=us-central1 --database-version=POSTGRES_15 \
+#     --tier=db-f1-micro --network=default --no-assign-ip
+#   gcloud sql databases create hapi --instance=vigil-hapi-db
+#
+# NOTE: HAPI cold-starts in ~25-40s on first request. Keep minScale >= 1.
+# If that fails on Cloud Run's resource limits, fall back to Option C (GCE VM).
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: vigil-hapi
+  annotations:
+    # SEC-10: internal-only ingress. Other Cloud Run services in this project
+    # (mcp, a2a, api) can call it; the public internet cannot.
+    run.googleapis.com/ingress: internal
+    run.googleapis.com/ingress-status: internal
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        # VPC connector routes DB traffic to Cloud SQL private IP.
+        run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/us-central1/connectors/vigil-connector
+        run.googleapis.com/vpc-access-egress: all-traffic
+        # HAPI takes 25-40s to boot. Keep 1 instance warm, cap at 1 to avoid
+        # multiple instances racing the same Postgres writes during demo.
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        # Larger boot time budget
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: vigil-run@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 20
+      timeoutSeconds: 120
+      containers:
+        - name: vigil-hapi
+          image: hapiproject/hapi:v7.2.0
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            # spring.datasource.url points at the Cloud SQL private IP.
+            # Replace CLOUD_SQL_PRIVATE_IP with the IP from:
+            #   gcloud sql instances describe vigil-hapi-db \
+            #     --format='value(ipAddresses[0].ipAddress)'
+            - name: spring.datasource.url
+              value: jdbc:postgresql://CLOUD_SQL_PRIVATE_IP:5432/hapi
+            - name: spring.datasource.username
+              value: hapi
+            - name: spring.datasource.password
+              valueFrom:
+                secretKeyRef:
+                  name: hapi-db-password
+                  key: latest
+            - name: spring.datasource.driverClassName
+              value: org.postgresql.Driver
+            - name: spring.jpa.properties.hibernate.dialect
+              value: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
+            - name: hapi.fhir.fhir_version
+              value: R4
+            - name: hapi.fhir.allow_multiple_delete
+              value: "true"
+            - name: hapi.fhir.reuse_cached_search_results_millis
+              value: "0"
+            - name: hapi.fhir.default_encoding
+              value: JSON
+          resources:
+            limits:
+              # HAPI is JVM — give it real memory and CPU.
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            httpGet:
+              path: /fhir/metadata
+            periodSeconds: 10
+            failureThreshold: 12
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /fhir/metadata
+            periodSeconds: 30
+            timeoutSeconds: 10
+  traffic:
+    - percent: 100
+      latestRevision: true

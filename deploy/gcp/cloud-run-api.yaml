@@ -1,0 +1,86 @@
+# Cloud Run — Vigil FastAPI Proxy (vigil-api)
+#
+# Deploy:
+#   gcloud run services replace deploy/gcp/cloud-run-api.yaml \
+#     --region=us-central1 --project=$PROJECT_ID
+#
+# Public — Next.js dashboard on Vercel calls /api/* on this host.
+# The /api/patients/{id}/alerts/{id}/approve endpoint is the ONLY FHIR
+# write path in the entire stack (see backend/api/main.py).
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: vigil-api
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/us-central1/connectors/vigil-connector
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      serviceAccountName: vigil-run@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 80
+      # Frontend "Tick Now" proxies through /api/agent/tick → A2A /tick, which
+      # can take 60-120s for a full cycle. Cloud Run default is 300s.
+      timeoutSeconds: 300
+      containers:
+        - name: vigil-api
+          image: us-central1-docker.pkg.dev/PROJECT_ID/vigil/vigil:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: SERVICE
+              value: api
+            - name: API_PORT
+              value: "8080"
+            - name: FHIR_BASE_URL
+              value: https://vigil-hapi-PROJECT_HASH-uc.a.run.app/fhir
+            - name: A2A_AGENT_URL
+              value: https://vigil-a2a-PROJECT_HASH-uc.a.run.app
+            - name: LLM_PROVIDER
+              value: groq
+            - name: CORS_ORIGINS
+              value: https://vigil-frontend.vercel.app,http://localhost:3000
+            - name: LOG_LEVEL
+              value: INFO
+            - name: VIGIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-api-key
+                  key: latest
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: groq-api-key
+                  key: latest
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api-key
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /api/health
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+            periodSeconds: 30
+            timeoutSeconds: 5
+  traffic:
+    - percent: 100
+      latestRevision: true

@@ -198,6 +198,43 @@ services — this keeps HAPI off the public internet.
 
 ---
 
+## Option D — Google Cloud Platform (Cloud Run)
+
+Deploy all four services to GCP Cloud Run using the GCP free-trial credit
+($300). Scales to zero when idle — effectively $0/month post-demo.
+
+Configs live under `deploy/gcp/`:
+
+- `cloud-run-mcp.yaml` — MCP server, public
+- `cloud-run-a2a.yaml` — A2A agent + AgentCard, public
+- `cloud-run-api.yaml` — FastAPI proxy, public
+- `cloud-run-hapi.yaml` — HAPI FHIR, **ingress=internal only (SEC-10)**
+- `cloudbuild.yaml` — builds the Dockerfile once and pushes to Artifact Registry
+- `README.md` — full step-by-step (enable APIs, create VPC connector, Cloud SQL
+  for HAPI, Secret Manager, deploy, seed, point Vercel at the new URLs)
+
+See [`deploy/gcp/README.md`](../deploy/gcp/README.md) for the full runbook.
+
+Summary of ingress policy on GCP:
+
+```
+Prompt Opinion runtime ──► https://vigil-mcp-*.a.run.app/mcp         (public)
+Prompt Opinion runtime ──► https://vigil-a2a-*.a.run.app/a2a         (public)
+Next.js (Vercel)        ──► https://vigil-api-*.a.run.app/api/*      (public)
+vigil-mcp / vigil-a2a   ──► https://vigil-hapi-*.a.run.app/fhir      (internal via VPC connector)
+vigil-api (approve)     ──► https://vigil-hapi-*.a.run.app/fhir      (internal via VPC connector)
+vigil-hapi              ──► Cloud SQL (postgres, private IP)
+```
+
+HAPI satisfies SEC-10 via `run.googleapis.com/ingress: internal` — the
+`*.a.run.app` URL is unreachable from the public internet; only services
+on the shared VPC connector can invoke it.
+
+Options B (GKE Autopilot) and C (single GCE VM) are documented briefly at
+the bottom of `deploy/gcp/README.md` as fallbacks if Cloud Run hits a limit.
+
+---
+
 ## Updating the tunnel/public URL without a Vercel redeploy
 
 Vercel Preview and Production environments both support runtime env var

@@ -1,0 +1,87 @@
+# Cloud Run — Vigil A2A Agent (vigil-a2a)
+#
+# Deploy:
+#   gcloud run services replace deploy/gcp/cloud-run-a2a.yaml \
+#     --region=us-central1 --project=$PROJECT_ID
+#
+# Public — Prompt Opinion fetches the AgentCard at
+#   /.well-known/agent-card.json  and calls /a2a (JSON-RPC).
+# The FastAPI proxy also hits POST /tick for the "Tick Now" button.
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: vigil-a2a
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/us-central1/connectors/vigil-connector
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "2"
+    spec:
+      serviceAccountName: vigil-run@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 40
+      # /tick can run 60-120s (10 patients × 4 MCP calls). Keep timeout generous.
+      timeoutSeconds: 300
+      containers:
+        - name: vigil-a2a
+          image: us-central1-docker.pkg.dev/PROJECT_ID/vigil/vigil:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: SERVICE
+              value: a2a
+            - name: A2A_PORT
+              value: "8080"
+            - name: MCP_BASE_URL
+              value: https://vigil-mcp-PROJECT_HASH-uc.a.run.app
+            - name: FHIR_BASE_URL
+              value: https://vigil-hapi-PROJECT_HASH-uc.a.run.app/fhir
+            # AgentCard self-advertises this public URL. Update after first deploy.
+            - name: A2A_PUBLIC_URL
+              value: https://vigil-a2a-PROJECT_HASH-uc.a.run.app
+            # Demo default (15 min poll) — drop to 60 for live demo if needed.
+            - name: POLL_INTERVAL_SEC
+              value: "900"
+            - name: LOG_LEVEL
+              value: INFO
+            - name: VIGIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-api-key
+                  key: latest
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: groq-api-key
+                  key: latest
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api-key
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /.well-known/agent-card.json
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /.well-known/agent-card.json
+            periodSeconds: 30
+            timeoutSeconds: 5
+  traffic:
+    - percent: 100
+      latestRevision: true
