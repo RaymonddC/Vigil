@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Activity, Bot, Database, ShieldCheck, ArrowRight } from "lucide-react";
+import { Activity, Bot, Database, ShieldCheck, ArrowRight, Play } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -17,12 +17,14 @@ type Stat = {
   label: string;
   detail: string;
   citation?: string;
+  emphasis?: boolean;
 };
 
 type Feature = {
   Icon: LucideIcon;
   badge: string;
   badgeClass: string;
+  iconTileClass: string;
   title: string;
   body: string;
 };
@@ -33,8 +35,9 @@ const STATS: Stat[] = [
   {
     value: "4.2M",
     label: "postoperative deaths per year",
-    detail: "More than TB, HIV/AIDS, and malaria each.",
+    detail: "More than TB, HIV/AIDS, and malaria combined.",
     citation: "Nepogodiev 2019, Lancet Global Health",
+    emphasis: true,
   },
   {
     value: "260K",
@@ -61,6 +64,7 @@ const FEATURES: Feature[] = [
     Icon: Activity,
     badge: "Path A · MCP",
     badgeClass: "bg-[#EFF6FF] text-[#1E40AF]",
+    iconTileClass: "bg-[#EFF6FF] text-[#1E40AF]",
     title: "4 Clinical Early-Warning Tools",
     body: "screen_vital_thresholds, score_deterioration_risk, flag_sepsis_onset, generate_escalation_note — each enforces published standards (MEWT, qSOFA, CDC ASE) deterministically, then layers an LLM reasoning pass.",
   },
@@ -68,6 +72,7 @@ const FEATURES: Feature[] = [
     Icon: Bot,
     badge: "Path B · A2A",
     badgeClass: "bg-[#ECFDF5] text-[#065F46]",
+    iconTileClass: "bg-[#ECFDF5] text-[#065F46]",
     title: "Autonomous Postop Sentinel Agent",
     body: "15-minute monitoring loop: IDLE → POLLING → SCREENING → RISK_SCORING → SEPSIS_CHECK → ESCALATING → AWAITING_REVIEW. Calls all 4 MCP tools in sequence. Never acts without clinician sign-off — every RRT alert requires one-tap approval.",
   },
@@ -75,6 +80,7 @@ const FEATURES: Feature[] = [
     Icon: Database,
     badge: "FHIR R4",
     badgeClass: "bg-[#FFFBEB] text-[#92400E]",
+    iconTileClass: "bg-[#FFFBEB] text-[#92400E]",
     title: "HAPI FHIR Interoperability",
     body: "Reads Patient + Observation bundles. Writes Communication + AuditEvent on approval. Tenant routing via 3 SHARP headers: x-fhir-server-url, x-fhir-access-token, x-patient-id.",
   },
@@ -82,6 +88,7 @@ const FEATURES: Feature[] = [
     Icon: ShieldCheck,
     badge: "Safety · Human-in-loop",
     badgeClass: "bg-[#FFF7ED] text-[#9A3412]",
+    iconTileClass: "bg-[#FFF7ED] text-[#9A3412]",
     title: "Clinician Approves Before Alert Fires",
     body: "AI drafts the SBAR note. The clinician reviews and taps Approve. One click sends the RRT Communication to FHIR and logs the AuditEvent. Zero autonomous escalation.",
   },
@@ -94,46 +101,71 @@ export default function LandingPage() {
     <div className="min-h-full flex flex-col">
       {/* ── Hero ─────────────────────────────────────────────────── */}
       <section
-        className="flex-none px-8 pt-12 pb-10 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+        className="relative flex-none px-8 pt-14 pb-12 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
         aria-label="Product overview"
       >
-        <div className="max-w-2xl">
+        {/* Ambient background — faint radial blue wash, extremely subtle */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-60 dark:opacity-40"
+          style={{
+            background:
+              "radial-gradient(circle at 85% 10%, rgba(11,95,255,0.07), transparent 45%), radial-gradient(circle at 15% 90%, rgba(11,95,255,0.05), transparent 50%)",
+          }}
+        />
+
+        <div className="relative max-w-3xl">
           {/* Eyebrow */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-5">
-            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-[#EFF5FF] text-[#0B5FFF]">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-6">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[#EFF5FF] text-[#0B5FFF] ring-1 ring-inset ring-[#0B5FFF]/15">
+              <span className="relative inline-flex w-1.5 h-1.5" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-[#0B5FFF] opacity-60 animate-ping" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#0B5FFF]" />
+              </span>
               Agents Assemble — Healthcare AI Endgame
             </span>
             <span className="text-slate-300 dark:text-slate-600 select-none" aria-hidden="true">
               ·
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Option B · MCP + A2A</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+              Option B · MCP + A2A
+            </span>
           </div>
 
           {/* H1 */}
-          <h1 className="font-[family-name:var(--font-geist-sans)] text-[2.25rem] font-bold leading-[1.15] tracking-tight text-slate-900 dark:text-slate-50 mb-4">
-            Postop + maternal
-            <br />
-            deterioration sentinel.
+          <h1 className="font-[family-name:var(--font-geist-sans)] text-[2.5rem] sm:text-[3rem] font-bold leading-[1.1] tracking-tight text-slate-900 dark:text-slate-50 mb-5">
+            Postop + maternal<br />
+            <span className="bg-gradient-to-r from-[#0B5FFF] via-[#1E40AF] to-[#0B5FFF] bg-clip-text text-transparent">
+              deterioration sentinel.
+            </span>
           </h1>
 
           {/* Pitch */}
-          <p className="text-base text-slate-600 dark:text-slate-300 leading-relaxed mb-8 max-w-xl">
-            Four reusable clinical MCP tools + one autonomous A2A agent. Detects
-            sepsis patterns{" "}
-            <strong className="font-semibold text-slate-800 dark:text-slate-200">
+          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed mb-8 max-w-2xl">
+            Four reusable clinical MCP tools plus one autonomous A2A agent.
+            Detects sepsis patterns{" "}
+            <strong className="font-semibold text-[#0B5FFF] dark:text-[#3B82F6]">
               30–60 minutes before crisis
             </strong>
-            . Published to the Prompt Opinion Marketplace.
+            . Clinician approves every alert. Published to the Prompt Opinion
+            Marketplace.
           </p>
 
           {/* CTAs */}
           <nav aria-label="Quick links" className="flex flex-wrap items-center gap-3">
             <Link
               href="/patients"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-medium bg-[#0B5FFF] text-white hover:bg-[#0950DB] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF] min-h-[44px]"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-semibold bg-[#0B5FFF] text-white shadow-sm shadow-[#0B5FFF]/20 hover:bg-[#0950DB] hover:shadow-md hover:shadow-[#0B5FFF]/25 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF] min-h-[44px]"
             >
               Open Dashboard
-              <ArrowRight size={15} aria-hidden="true" />
+              <ArrowRight size={15} strokeWidth={2.5} aria-hidden="true" />
+            </Link>
+            <Link
+              href="/timeline"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-[#0B5FFF] dark:hover:text-[#3B82F6] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF] min-h-[44px]"
+            >
+              <Play size={13} fill="currentColor" aria-hidden="true" />
+              Watch agent run
             </Link>
             <a
               href="https://github.com"
@@ -160,32 +192,62 @@ export default function LandingPage() {
 
       {/* ── Stats ────────────────────────────────────────────────── */}
       <section
-        className="flex-none px-8 py-8 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
+        className="flex-none px-8 py-10 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
         aria-label="Problem scope"
       >
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-7 max-w-2xl lg:grid-cols-4">
+        {/* Section eyebrow */}
+        <p className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400 mb-5">
+          The scope of the problem
+        </p>
+
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-8 max-w-3xl lg:grid-cols-4">
           {STATS.map((s) => (
-            <div key={s.label} className="flex flex-col gap-0.5">
+            <div
+              key={s.label}
+              className={[
+                "flex flex-col gap-1 relative",
+                s.emphasis
+                  ? "lg:pr-6 lg:border-r lg:border-slate-200 dark:lg:border-slate-800"
+                  : "",
+              ].join(" ")}
+            >
               <dt className="sr-only">{s.label}</dt>
               <dd
-                className="font-[family-name:var(--font-geist-sans)] text-[2rem] font-bold tracking-tight text-slate-900 dark:text-slate-50 leading-none"
+                className={[
+                  "font-[family-name:var(--font-geist-sans)] font-bold tracking-tight leading-none",
+                  s.emphasis
+                    ? "text-[2.75rem] sm:text-[3.25rem] bg-gradient-to-br from-[#991B1B] via-[#B91C1C] to-[#DC2626] bg-clip-text text-transparent"
+                    : "text-[2rem] text-slate-900 dark:text-slate-50",
+                ].join(" ")}
                 aria-label={`${s.value}${s.unit ?? ""} — ${s.label}`}
               >
                 {s.value}
                 {s.unit && (
-                  <span className="text-base font-semibold text-slate-500 dark:text-slate-400 ml-0.5">
+                  <span
+                    className={[
+                      "font-semibold ml-0.5",
+                      s.emphasis
+                        ? "text-lg text-slate-500 dark:text-slate-400 bg-none"
+                        : "text-base text-slate-500 dark:text-slate-400",
+                    ].join(" ")}
+                  >
                     {s.unit}
                   </span>
                 )}
               </dd>
-              <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mt-1">
+              <p
+                className={[
+                  "font-medium text-slate-700 dark:text-slate-200 mt-1.5",
+                  s.emphasis ? "text-sm" : "text-xs",
+                ].join(" ")}
+              >
                 {s.label}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
                 {s.detail}
               </p>
               {s.citation && (
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-0.5">
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-0.5 font-[family-name:var(--font-geist-mono)]">
                   {s.citation}
                 </p>
               )}
@@ -195,24 +257,29 @@ export default function LandingPage() {
       </section>
 
       {/* ── Features ─────────────────────────────────────────────── */}
-      <section className="flex-1 px-8 py-8" aria-label="Product features">
-        <h2 className="font-[family-name:var(--font-geist-sans)] text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50 mb-5">
-          What Vigil does
-        </h2>
+      <section className="flex-1 px-8 py-10" aria-label="Product features">
+        <div className="mb-6 max-w-3xl">
+          <p className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400 mb-2">
+            How Vigil works
+          </p>
+          <h2 className="font-[family-name:var(--font-geist-sans)] text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+            Two paths, one FHIR-native core
+          </h2>
+        </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 max-w-2xl">
-          {FEATURES.map(({ Icon, badge, badgeClass, title, body }) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 max-w-3xl">
+          {FEATURES.map(({ Icon, badge, badgeClass, iconTileClass, title, body }) => (
             <article
               key={title}
-              className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:shadow-md transition-shadow"
+              className="group bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition-all"
             >
               {/* Header */}
               <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                  <Icon size={18} aria-hidden="true" />
+                <div className={`p-2 rounded-md ${iconTileClass}`}>
+                  <Icon size={18} strokeWidth={2} aria-hidden="true" />
                 </div>
                 <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${badgeClass}`}
+                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold font-[family-name:var(--font-geist-mono)] ${badgeClass}`}
                 >
                   {badge}
                 </span>
