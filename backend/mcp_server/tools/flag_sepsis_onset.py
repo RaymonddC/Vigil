@@ -1,7 +1,8 @@
 """B4 — flag_sepsis_onset implementation.
 
 CDC Adult Sepsis Event (ASE) surveillance logic:
-  1. Presumed infection — antibiotic administration detected
+  1. Presumed infection — NEW antibiotic administration detected within the
+     empiric window (pre-operative prophylaxis excluded; see _ABX_EMPIRIC_WINDOW_HOURS)
   2. Organ dysfunction — any of:
      - Lactate >= 2.0 mmol/L (LOINC 2524-7)
      - SBP <= 100 mmHg (LOINC 8480-6)
@@ -43,6 +44,20 @@ _LOINC_GCS = "9269-2"
 # Antibiotic ATC prefix (J01 = antibacterials for systemic use)
 _ABX_ATC_PREFIX = "J01"
 
+# Vigil operational: only antibiotics administered within the last N hours count
+# as "new empirical therapy" for the CDC ASE presumed-infection criterion.
+# Pre-operative single-dose prophylaxis (typically given 30–60 min before
+# incision) is NOT a new treatment course — it does not constitute an infection
+# signal for CDC ASE surveillance purposes.
+# Derivation: CDC ASE requires "new administration of ≥1 qualifying antibiotic
+# on ≥4 consecutive days" (CLINICAL_EVIDENCE §4.1). Our 6-hour window is a
+# practical proxy: empirical / therapeutic ABX are started in response to
+# clinical deterioration (post-onset), while prophylactic doses occur pre-op
+# and are therefore >8h before the monitoring window for our seed dataset.
+# (Vigil operational choice — not a published threshold; prospective validation
+# required before clinical deployment.)
+_ABX_EMPIRIC_WINDOW_HOURS = 6
+
 
 def _latest_obs_value(
     observations: list[Observation], loinc: str,
@@ -66,11 +81,28 @@ def _latest_obs_value(
 
 def _find_antibiotic(
     med_admins: list[MedicationAdministration],
+    new_abx_since: datetime | None = None,
 ) -> str | None:
-    """Return ATC/RxNorm code if any antibiotic administration is found."""
+    """Return ATC/RxNorm code if a NEW antibiotic administration is found.
+
+    Args:
+        med_admins: All MedicationAdministration resources for the patient.
+        new_abx_since: If set, only administrations on or after this datetime
+            are considered. Antibiotics given before this cutoff (e.g., pre-op
+            prophylaxis) are excluded from the presumed-infection signal.
+            (Vigil operational, CLINICAL_EVIDENCE §4.1.)
+    """
     for ma in med_admins:
         if ma.status not in ("completed", "in-progress", "active"):
             continue
+        # Exclude antibiotics administered before the empiric-window cutoff.
+        # Pre-op prophylaxis (e.g., cefazolin 30 min before incision) does not
+        # constitute a new treatment course for CDC ASE purposes; only empirical
+        # / therapeutic antibiotics started during or after clinical deterioration
+        # count. (Vigil operational choice — CLINICAL_EVIDENCE §4.1.)
+        if new_abx_since is not None and ma.effectiveDateTime is not None:
+            if ma.effectiveDateTime < new_abx_since:
+                continue
         if ma.medicationCodeableConcept:
             for coding in ma.medicationCodeableConcept.coding:
                 code = coding.code or ""
@@ -156,8 +188,13 @@ async def run(
         criteria_met: list[str] = []
         onset_estimate: datetime | None = None
 
-        # --- Step 1: Presumed infection (antibiotic administration) ---
-        abx_code = _find_antibiotic(med_admins)
+        # --- Step 1: Presumed infection (new antibiotic administration) ---
+        # Only antibiotics administered within _ABX_EMPIRIC_WINDOW_HOURS count
+        # as "new empirical therapy". Pre-op prophylaxis given >8h ago is
+        # excluded — a single dose does not satisfy CDC ASE infection criterion.
+        # (Vigil operational, CLINICAL_EVIDENCE §4.1.)
+        new_abx_since = datetime.now(UTC) - timedelta(hours=_ABX_EMPIRIC_WINDOW_HOURS)
+        abx_code = _find_antibiotic(med_admins, new_abx_since=new_abx_since)
         has_presumed_infection = abx_code is not None
         evidence["abx_code"] = abx_code
         if has_presumed_infection:

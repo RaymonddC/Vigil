@@ -36,18 +36,58 @@ def _determine_severity(
     risk_result: dict[str, Any],
     sepsis_result: dict[str, Any],
 ) -> Literal["info", "urgent", "critical"]:
-    """Determine alert severity from the three tool outputs."""
+    """Determine alert severity from the three tool outputs.
+
+    Severity mapping (Vigil operational — tuned for demo narrative clarity):
+
+    critical:
+      - Sepsis suspected (CDC ASE or SIRS fallback), OR
+      - High risk band AND ≥2 absolute red-zone MEWT breaches simultaneously
+        (represents frank hemodynamic collapse, e.g. PT-010 PPH at T+4h
+        with both HR >130 and SBP <90 simultaneously).
+
+    urgent:
+      - High or moderate risk band (single-threshold deterioration), OR
+      - MEWT triggered with at least one absolute red breach.
+
+    info:
+      - Only mild (yellow) or trend-based signals.
+
+    Rationale: Shields 2016 MEWT (CLINICAL_EVIDENCE §2.2) distinguishes
+    "severe" triggers (any single parameter in the extreme zone = act NOW)
+    from "non-severe" (≥2 sustained abnormals = watch and reassess). Vigil
+    maps dual absolute-red to "critical" to mirror this stratification:
+    single-threshold trend-based deteriorators (PT-004..007) warrant
+    urgent escalation, while dual-parameter shock (PT-010 PPH) and sepsis
+    (PT-008/009) warrant critical. TREND-rule breaches are excluded from the
+    red-count because they fire earlier / before absolute thresholds and
+    intentionally carry lower intrinsic severity. (Vigil operational choice.)
+    """
     if sepsis_result.get("sepsis_suspected"):
         return "critical"
+
+    # Count absolute (non-TREND) red-severity MEWT breaches.
+    # TREND breaches represent slope-based early warnings, not frank threshold
+    # violations — they are excluded from the dual-red critical check.
+    breaches = vitals_result.get("breaches", [])
+    absolute_red_count = sum(
+        1 for b in breaches
+        if b.get("severity") == "red" and b.get("loinc") != "TREND"
+    )
+
     risk_band = risk_result.get("risk_band", "low")
-    if risk_band == "high":
+
+    # Dual absolute-red at high risk = critical (frank hemodynamic collapse).
+    # Example: PT-010 PPH at T+4h — HR 132 (>130 red) AND SBP 82 (<90 red).
+    if risk_band == "high" and absolute_red_count >= 2:
         return "critical"
-    if risk_band == "moderate":
+
+    if risk_band in ("high", "moderate"):
         return "urgent"
-    if vitals_result.get("status") == "triggered":
-        breaches = vitals_result.get("breaches", [])
-        if any(b.get("severity") == "red" for b in breaches):
-            return "urgent"
+
+    if vitals_result.get("status") == "triggered" and absolute_red_count >= 1:
+        return "urgent"
+
     return "info"
 
 

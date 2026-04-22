@@ -309,6 +309,138 @@ async def test_severity_critical_when_sepsis_suspected():
     assert result.severity == "critical"
 
 
+async def test_severity_urgent_high_risk_single_red_no_sepsis():
+    """High risk band + 1 absolute red breach + no sepsis → severity=urgent (not critical).
+
+    Post-tuning regression: risk_band=high alone no longer maps to 'critical'.
+    Critical now requires EITHER sepsis OR ≥2 simultaneous absolute red breaches
+    at high risk. Single-threshold deteriorators (PT-004..007) must stay urgent.
+    (Vigil operational, CLINICAL_EVIDENCE §2.2.)
+    """
+    vitals_one_red = {
+        **VITALS_TRIGGERED,
+        # Exactly 1 absolute red breach (SBP) — mirrors PT-007 at T+8h
+        "breaches": [
+            {
+                "loinc": "8480-6",
+                "label": "SBP",
+                "value": 88.0,
+                "unit": "mm[Hg]",
+                "threshold": "<90",
+                "severity": "red",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+            {
+                "loinc": "8867-4",
+                "label": "HR",
+                "value": 116.0,
+                "unit": "/min",
+                "threshold": ">110",
+                "severity": "yellow",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+        ],
+    }
+    result = await _run_with_mocks(
+        mock_client=_mock_fhir_client(),
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+        vitals=vitals_one_red,
+        risk=RISK_HIGH,
+        sepsis=SEPSIS_NEG,
+    )
+    assert result.severity == "urgent", (
+        "High risk + 1 red breach + no sepsis must be 'urgent', not 'critical'"
+    )
+
+
+async def test_severity_critical_dual_red_high_risk_no_sepsis():
+    """High risk band + ≥2 absolute red breaches + no sepsis → severity=critical.
+
+    Dual absolute-red represents frank hemodynamic collapse (PT-010 PPH at
+    T+4h: HR >130 AND SBP <90 simultaneously). This warrants 'critical'
+    without sepsis. (Vigil operational, CLINICAL_EVIDENCE §2.2.)
+    """
+    vitals_two_red = {
+        **VITALS_TRIGGERED,
+        # Two absolute red breaches — mirrors PT-010 PPH at T+4h
+        "breaches": [
+            {
+                "loinc": "8480-6",
+                "label": "SBP",
+                "value": 82.0,
+                "unit": "mm[Hg]",
+                "threshold": "<90",
+                "severity": "red",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+            {
+                "loinc": "8867-4",
+                "label": "HR",
+                "value": 132.0,
+                "unit": "/min",
+                "threshold": ">130",
+                "severity": "red",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+        ],
+    }
+    result = await _run_with_mocks(
+        mock_client=_mock_fhir_client(),
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+        vitals=vitals_two_red,
+        risk=RISK_HIGH,
+        sepsis=SEPSIS_NEG,
+    )
+    assert result.severity == "critical", (
+        "High risk + 2 absolute red breaches (dual-parameter collapse) must be 'critical'"
+    )
+
+
+async def test_severity_trend_breach_not_counted_as_absolute_red():
+    """TREND breach (loinc='TREND') does NOT count toward the dual-red threshold.
+
+    Trend-based signals fire earlier and at lower intrinsic severity than
+    absolute threshold violations — they should not elevate severity to
+    'critical' even if the composite risk is high. (Vigil operational.)
+    """
+    vitals_trend_plus_one_red = {
+        **VITALS_TRIGGERED,
+        # 1 TREND (excluded from count) + 1 absolute red = total 1 absolute red
+        "breaches": [
+            {
+                "loinc": "TREND",
+                "label": "Hemodynamic Trend",
+                "value": 0.0,
+                "unit": "",
+                "threshold": "SBP -12.3% AND HR +21.1% over 2.0h",
+                "severity": "red",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+            {
+                "loinc": "8480-6",
+                "label": "SBP",
+                "value": 88.0,
+                "unit": "mm[Hg]",
+                "threshold": "<90",
+                "severity": "red",
+                "observed_at": "2026-04-15T10:00:00Z",
+            },
+        ],
+    }
+    result = await _run_with_mocks(
+        mock_client=_mock_fhir_client(),
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+        vitals=vitals_trend_plus_one_red,
+        risk=RISK_HIGH,
+        sepsis=SEPSIS_NEG,
+    )
+    # Only 1 absolute red (TREND excluded) → urgent, not critical
+    assert result.severity == "urgent", (
+        "TREND breach should not count toward dual-red threshold; "
+        "1 absolute red + 1 TREND at high risk should be 'urgent'"
+    )
+
+
 async def test_severity_info_when_all_ok():
     """Normal patient → severity=info."""
     result = await _run_with_mocks(

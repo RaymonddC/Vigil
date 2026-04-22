@@ -8,12 +8,18 @@ Acceptance criteria (BUILD_PLAN.md B4):
 
 All FhirClient calls are mocked; tool_call_timer is replaced with a no-op
 context manager so tests don't require a running asyncio event store.
+
+Antibiotic timing note (post-tuning): _find_antibiotic now filters by
+_ABX_EMPIRIC_WINDOW_HOURS (6h). Tests that expect an antibiotic to be
+detected use effectiveDateTime=datetime.now(UTC) - 1h (recent, within
+the window). Pre-op prophylaxis (>8h ago) is correctly excluded — that
+behaviour is verified in test_preop_abx_excluded_as_presumed_infection.
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from backend.fhir.client import FhirClientError
@@ -71,14 +77,30 @@ def _lab(loinc: str, value: float, unit: str = "") -> Observation:
     )
 
 
-def _antibiotic(code: str = "J01DD04", display: str = "ceftriaxone") -> MedicationAdministration:
-    """Create an antibiotic MedicationAdministration with ATC J01* code."""
+def _antibiotic(
+    code: str = "J01DD04",
+    display: str = "ceftriaxone",
+    effective_dt: datetime | None = None,
+) -> MedicationAdministration:
+    """Create an antibiotic MedicationAdministration with ATC J01* code.
+
+    Args:
+        code: ATC code (J01* prefix = antibacterial).
+        display: Drug display name.
+        effective_dt: Administration timestamp. Defaults to now-1h so it
+            falls within the _ABX_EMPIRIC_WINDOW_HOURS=6h window used by
+            _find_antibiotic. Pass an older datetime to simulate pre-op
+            prophylaxis that should be excluded.
+    """
+    if effective_dt is None:
+        # Recent therapeutic antibiotic — within the 6h empiric window.
+        effective_dt = datetime.now(UTC) - timedelta(hours=1)
     return MedicationAdministration(
         status="completed",
         medicationCodeableConcept=CodeableConcept(coding=[
             Coding(system="http://www.whocc.no/atc", code=code, display=display)
         ]),
-        effectiveDateTime=T4H,
+        effectiveDateTime=effective_dt,
     )
 
 
@@ -290,3 +312,93 @@ async def test_output_schema_always_valid():
     assert isinstance(result.evidence, dict)
     assert result.mode in ("cdc_ase", "sirs_fallback")
     assert isinstance(result.sepsis_suspected, bool)
+
+
+# ---------------------------------------------------------------------------
+# Pre-op prophylaxis excluded by empiric window (post-tuning regression)
+# ---------------------------------------------------------------------------
+
+async def test_preop_abx_excluded_as_presumed_infection():
+    """Pre-op prophylaxis (cefazolin given >8h ago) must NOT count as presumed
+    infection even when organ-dysfunction criteria are met.
+
+    This regression guards the fix that prevents deteriorating patients
+    (PT-004..007) from all triggering sepsis_suspected=True just because
+    they received standard surgical prophylaxis.  (CLINICAL_EVIDENCE §4.1,
+    Vigil operational — _ABX_EMPIRIC_WINDOW_HOURS=6h window.)
+    """
+    mock_client = AsyncMock()
+
+    PREOP_CEFAZOLIN = _antibiotic(
+        code="309264",  # RxNorm for cefazolin
+        display="Cefazolin 1 g IV",
+        # Simulate pre-op prophylaxis: given 8.5 hours ago (before surgery)
+        effective_dt=datetime.now(UTC) - timedelta(hours=8, minutes=30),
+    )
+
+    # Deteriorating labs: lactate ≥ 2.0 qualifies as organ dysfunction
+    DETERIORATING_LABS = [
+        _lab("2524-7", 2.8, "mmol/L"),  # lactate ≥ 2.0
+        _lab("2160-0", 1.2, "mg/dL"),   # creatinine — mild rise
+    ]
+
+    async def _obs(patient_id, category=None, since=None, count=100):
+        return PT009_VITALS if category == "vital-signs" else DETERIORATING_LABS
+
+    mock_client.get_observations.side_effect = _obs
+    mock_client.get_medication_administrations.return_value = [PREOP_CEFAZOLIN]
+
+    with patch(
+        "backend.mcp_server.tools.flag_sepsis_onset.tool_call_timer", _noop_timer
+    ), patch("backend.mcp_server.tools.flag_sepsis_onset.FhirClient") as MockFC:
+        MockFC.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        MockFC.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result_json = await run("PT-007", 24, FHIR_CTX)
+
+    result = SepsisFlagOutput.model_validate_json(result_json)
+    # Pre-op prophylaxis is outside the 6h empiric window → NOT an infection signal
+    assert result.sepsis_suspected is False, (
+        "Pre-op cefazolin prophylaxis (>8h ago) should not satisfy CDC ASE "
+        "presumed-infection criterion even when lactate ≥ 2.0"
+    )
+    assert result.evidence.get("abx_code") is None, (
+        "abx_code should be None when only pre-op prophylaxis is in history"
+    )
+
+
+async def test_recent_therapeutic_abx_counts_as_infection():
+    """A NEW therapeutic antibiotic (within 6h) + organ dysfunction → sepsis flagged.
+
+    This is the positive case: PT-009 receives ampi-sulbactam post-onset
+    (within the empiric window), and the deteriorating vitals/labs satisfy
+    organ dysfunction — so sepsis_suspected=True.
+    """
+    mock_client = AsyncMock()
+
+    RECENT_AMPI_SULBACTAM = _antibiotic(
+        code="1659149",  # RxNorm ampicillin-sulbactam
+        display="Ampicillin-sulbactam 3 g IV",
+        # Therapeutic: given ~3.5h ago (well within 6h window)
+        effective_dt=datetime.now(UTC) - timedelta(hours=3, minutes=30),
+    )
+
+    async def _obs(patient_id, category=None, since=None, count=100):
+        return PT009_VITALS if category == "vital-signs" else PT009_LABS
+
+    mock_client.get_observations.side_effect = _obs
+    mock_client.get_medication_administrations.return_value = [RECENT_AMPI_SULBACTAM]
+
+    with patch(
+        "backend.mcp_server.tools.flag_sepsis_onset.tool_call_timer", _noop_timer
+    ), patch("backend.mcp_server.tools.flag_sepsis_onset.FhirClient") as MockFC:
+        MockFC.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        MockFC.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result_json = await run("PT-009", 24, FHIR_CTX)
+
+    result = SepsisFlagOutput.model_validate_json(result_json)
+    assert result.sepsis_suspected is True
+    assert result.mode == "cdc_ase"
+    assert any("antibiotic" in c.lower() or "infection" in c.lower()
+               for c in result.criteria_met)

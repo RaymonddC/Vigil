@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -42,9 +43,20 @@ FHIR_BASE = os.getenv("FIXTURE_BASE_URL", "http://localhost:8080/fhir")
 
 _index: dict[str, dict[str, dict]] = {}
 
+# Seed T0 anchor — recovered from the earliest MedicationAdministration
+# timestamp at load time.  Pre-op prophylaxis (cefazolin) is administered
+# at T0 − 30 min, so:  seed_T0 = min(MedAdmin.effectiveDateTime) + 30 min.
+# Used by _rebase_medadmin() to shift timestamps to the CURRENT monitoring
+# window (now − 8 h) at request time, keeping integration tests deterministic
+# regardless of the date the fixture files were generated.
+# (Vigil fixture operational choice — mirrors the Observation endpoint's design
+# philosophy of returning all data irrespective of the tool's lookback window.)
+_seed_t0: datetime | None = None
+
 
 def _load_bundles() -> None:
     """Parse all PT-*.json bundles and index resources by type and id."""
+    global _seed_t0
     _index.clear()
     files = sorted(DATA_DIR.glob("PT-*.json"))
     if not files:
@@ -58,6 +70,22 @@ def _load_bundles() -> None:
             rid = resource.get("id")
             if rt and rid:
                 _index.setdefault(rt, {})[rid] = resource
+
+    # Recover seed T0 from the earliest MedAdmin timestamp.
+    # All patients receive pre-op cefazolin at T0 − 30 min; the minimum
+    # effectiveDateTime across all MedicationAdministrations is therefore
+    # seed_T0 − 30 min, giving us seed_T0 = min_time + 30 min.
+    min_time: datetime | None = None
+    for resource in _index.get("MedicationAdministration", {}).values():
+        ts_str = resource.get("effectiveDateTime", "")
+        if ts_str:
+            try:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if min_time is None or ts < min_time:
+                    min_time = ts
+            except ValueError:
+                pass
+    _seed_t0 = (min_time + timedelta(minutes=30)) if min_time is not None else None
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -113,6 +141,39 @@ def _resources_for_patient(resource_type: str, patient_id: str) -> list[dict]:
         r for r in _index.get(resource_type, {}).values()
         if _patient_ref(r, patient_id)
     ]
+
+
+def _rebase_medadmin(resource: dict) -> dict:
+    """Shift a MedicationAdministration's effectiveDateTime to the current window.
+
+    The seed data fixes all timestamps relative to T0 = seed NOW − 8 h.
+    At test time we rebase them to T0 = now − 8 h so that the empiric-window
+    filter in flag_sepsis_onset (_ABX_EMPIRIC_WINDOW_HOURS = 6 h) behaves
+    identically to production:
+
+      * Pre-op cefazolin at seed T0 − 30 min  →  now − 8.5 h  (> 6 h ago = excluded ✓)
+      * Therapeutic ABX at seed T0 + 4–5 h    →  now − 3–4 h  (< 6 h ago = included ✓)
+
+    Rebasing happens at response time (the stored resource is unchanged).
+    (Vigil fixture operational choice — mirrors the Observation endpoint's
+    "return all rows regardless of date" design so clinical-assertion tests
+    are deterministic regardless of the date the fixtures were generated.)
+    """
+    if _seed_t0 is None:
+        return resource
+    ts_str = resource.get("effectiveDateTime", "")
+    if not ts_str:
+        return resource
+    try:
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        current_t0 = datetime.now(UTC) - timedelta(hours=8)
+        delta = current_t0 - _seed_t0
+        new_ts = ts + delta
+        rebased = dict(resource)
+        rebased["effectiveDateTime"] = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return rebased
+    except (ValueError, TypeError):
+        return resource
 
 
 # ── FHIR endpoints ─────────────────────────────────────────────────────────────
@@ -202,11 +263,19 @@ def search_conditions(patient: str = Query(default="")) -> JSONResponse:
 
 @app.get("/fhir/MedicationAdministration")
 def search_medication_administrations(patient: str = Query(default="")) -> JSONResponse:
-    """Return medication administrations for a patient."""
+    """Return medication administrations for a patient.
+
+    Timestamps are rebased to the current monitoring window (now − 8 h) so
+    that the empiric-window filter in flag_sepsis_onset works correctly
+    regardless of when the fixture files were generated.  See _rebase_medadmin.
+    """
     if not patient:
         resources = list(_index.get("MedicationAdministration", {}).values())
     else:
         resources = _resources_for_patient("MedicationAdministration", patient)
+    # Rebase to current T0 so pre-op prophylaxis stays outside the empiric
+    # window and therapeutic antibiotics fall inside it. (Vigil fixture op.)
+    resources = [_rebase_medadmin(r) for r in resources]
     return _fhir_json(_searchset(resources))
 
 
