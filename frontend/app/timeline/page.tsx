@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { fetchEvents, triggerAgentTick, type VigilEvent } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -106,6 +107,7 @@ function fmtTime(isoTs: string): string {
 // ---------------------------------------------------------------------------
 
 export default function TimelinePage() {
+  const router = useRouter();
   const [events, setEvents] = useState<VigilEvent[]>([]);
   const [patientFilter, setPatientFilter] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -148,11 +150,16 @@ export default function TimelinePage() {
     try {
       const res = await triggerAgentTick();
       setTickMessage(res.triggered ? 'Cycle triggered' : `Failed: ${res.detail}`);
+      if (res.triggered) {
+        // Bust the Next.js router cache so /patients RSC re-fetches fresh
+        // risk bands + alert counts on next navigation without a hard reload.
+        router.refresh();
+      }
     } catch {
       setTickMessage('Agent unreachable');
     } finally {
       setTickPending(false);
-      poll(); // immediate refresh
+      poll(); // immediate timeline refresh
     }
   };
 

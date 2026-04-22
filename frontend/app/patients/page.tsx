@@ -6,6 +6,14 @@ export const metadata = {
 };
 
 /**
+ * Revalidate this route segment every 15 s so latest_risk_band and
+ * unread_alerts stay reasonably fresh without a hard reload.  The
+ * Timeline page's "Tick Now" button also calls router.refresh() on
+ * success to bust the Next.js router cache immediately.  FRONTEND_SPEC §3.1
+ */
+export const revalidate = 15;
+
+/**
  * Server Component: fetches patient list from FastAPI backend.
  * Gracefully degrades with an offline notice when backend is unreachable.
  * FRONTEND_SPEC §3.1
