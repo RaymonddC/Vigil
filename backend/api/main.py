@@ -183,6 +183,26 @@ async def get_latest_alert(patient_id: str) -> dict[str, Any]:
     return result
 
 
+@app.get("/api/patients/{patient_id}/alerts/{alert_id}")
+async def get_alert_by_id(patient_id: str, alert_id: str) -> dict[str, Any]:
+    """Single alert by id, scoped to a patient. Used by FE8 alert detail page."""
+    from backend.api.review_queue import get_alert as _get_alert
+
+    alert = await asyncio.to_thread(_get_alert, alert_id)
+    if not alert or alert.get("patient_id") != patient_id:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {
+        "alert_id": alert["id"],
+        "severity": alert.get("severity"),
+        "sent": alert.get("created_at"),
+        "recipient_role": alert.get("recipient_role"),
+        "sbar": alert.get("sbar", {}),
+        "narrative": alert.get("narrative", ""),
+        "model_used": alert.get("model_used", ""),
+        "status": alert.get("status"),
+    }
+
+
 @app.post("/api/patients/{patient_id}/alerts/{alert_id}/approve")
 async def approve_alert(
     patient_id: str,
