@@ -21,13 +21,33 @@ export default async function PatientsPage() {
     offline = true;
   }
 
+  const rosterCount = patients.length;
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5">
       {/* Page heading */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold font-[family-name:var(--font-geist-sans)] text-slate-900 dark:text-slate-50 tracking-tight">
-          Post-operative Patients
-        </h1>
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold font-[family-name:var(--font-geist-sans)] text-slate-900 dark:text-slate-50 tracking-tight">
+            Post-operative Patients
+          </h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Sorted by risk · updated live from FHIR
+          </p>
+        </div>
+        {!offline && rosterCount > 0 && (
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="relative inline-flex w-2 h-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span>
+              <span className="font-[family-name:var(--font-geist-mono)] tabular-nums font-semibold text-slate-700 dark:text-slate-200">
+                {rosterCount}
+              </span>
+              <span className="ml-1">on service</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {offline ? (
