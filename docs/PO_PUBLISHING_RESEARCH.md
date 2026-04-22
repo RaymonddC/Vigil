@@ -1,6 +1,8 @@
 # Prompt Opinion Publishing Flow — Research Notes
 
-> Researched 2026-04-21 from public sources only (no Discord). Confidence ratings reflect source authority.
+> **UPDATED 2026-04-22:** Darena Health published the official "Agents Assemble Challenge — Getting Started" video on YouTube ([Qvs_QK4meHc](https://www.youtube.com/watch?v=Qvs_QK4meHc)). The video answers Q1 and Q2 definitively — no Discord needed. The answers below are now **HIGH confidence** with the canonical source. See `## Confirmed Publishing Flow (from official video)` at the bottom of this file for the locked walkthrough.
+
+> Original research from 2026-04-21 (public sources, no Discord). Confidence ratings retained for historical context.
 
 ---
 
@@ -152,10 +154,79 @@ No rate limits or fees documented publicly. Free tier appears unlimited for hack
 
 ## Discord Questions Prioritized
 
-Ask these on day 1, in order of blocking risk:
+~~Ask these on day 1, in order of blocking risk:~~ **NO LONGER NEEDED — answered by Darena Health's official Getting Started video (2026-04-22). See section below.** The blocking questions Q1, Q2, Q3 (workspace scope), Q4 (manifest), and Q5 (CLI) are all definitively resolved.
 
-1. **(BLOCKING — MCP)** What is the exact flow to list a community Python MCP server on the Prompt Opinion Marketplace? Is it a form in `app.promptopinion.ai`, a Discord request, or a PR against a registry repo?
-2. **(BLOCKING — A2A)** To register an external A2A agent, do we submit the agent card URL + API key via a form in the app? Or is there a different channel (Discord, email, API call)?
-3. **(MEDIUM — credentials)** Is there a shared hackathon workspace or special credentials for Agents Assemble participants, or does each builder use their own free account? Is the `fhir_extension_uri` workspace-scoped?
-4. **(LOW — manifest)** Do you require any `prompt_opinion_config.json` manifest file, or are the agent card + MCP capability extension the complete registration artifacts?
-5. **(LOW — CLI)** Is there an official `po` CLI for validation or publishing, or is everything done through the web dashboard?
+The only thing not covered in the video that may still warrant a Discord ask is whether participants get a shared `fhir_extension_uri` for cross-team interop, but that doesn't block our submission — each team's workspace-scoped URI works for the judging flow.
+
+---
+
+## Confirmed Publishing Flow (from official video — HIGH confidence)
+
+**Source:** "Agents Assemble Challenge — Getting Started" by Darena Health, https://www.youtube.com/watch?v=Qvs_QK4meHc (uploaded ~2026-04). Walkthrough delivered by the platform's product lead.
+
+### Marketplace publishing — both Path A and Path B
+
+The dashboard at `app.promptopinion.ai` has a section labelled **"Marketplace Studio"** at the bottom of the left nav. Publishing is done from there:
+
+1. Open `app.promptopinion.ai` → log in
+2. Click **Marketplace Studio** (bottom of left nav)
+3. Choose **MCP Server** or **Agent** depending on what you're publishing
+4. Click **Add / Publish**, paste your endpoint URL (same form as adding to your own workspace)
+5. The listing becomes discoverable for judges to test
+
+**Required before judging starts.** Quote: *"This step will be needed before the judging starts."*
+
+### Path A — MCP server registration (private workspace test path)
+
+Same form, just routed to your own workspace instead of the public marketplace:
+
+1. Workspace Hub → "Add new MCP server"
+2. Paste URL: `https://<your-host>/mcp` (note: include the `/mcp` path)
+3. Name it, choose **"Streamable HTTP"** transport
+4. **Check the box for "pass token"** — this is what triggers the SHARP `x-fhir-access-token` injection at runtime
+5. Click **Test** — the platform fetches your tools list and shows them registered
+6. Click **Save**
+
+Vigil endpoint: our MCP server is mounted at `/mcp` via the FastAPI mount in `backend/mcp_server/server.py` — already correct.
+
+### Path B — External A2A agent registration
+
+1. Workspace Hub → **"Connect external agent"** → Add connection
+2. Paste agent **base URL** (NOT the `/.well-known/agent-card.json` path — just `https://<your-host>`)
+3. Click **Check** — platform auto-fetches the AgentCard and displays the declared skills
+4. If your AgentCard declares an API-key security scheme, paste your `VIGIL_API_KEY` value
+5. **Toggle "FHIR context" → ON** — so the platform injects FHIR metadata into A2A messages at the `https://vigil.local/schemas/a2a/v1/fhir-context` extension key
+6. Click **Save**
+
+Vigil A2A: AgentCard already advertises the `ai.promptopinion/fhir-context` extension as required, and `apiKey` security scheme (X-API-Key header). Both already match the form fields the video shows.
+
+### Important runtime detail
+
+> *"When you create the workspace within Prompt Opinion it is actually a fire server. So you can pretty much make any fire server calls from that MCP server which will be made to your workspace."*
+
+So at runtime, the SHARP `x-fhir-server-url` will point to the **judge's PO workspace FHIR endpoint** — not their local HAPI, not our HAPI, not our fixture. Our MCP tools query whatever workspace is calling. This means the fixture-mode deploy is fine for our hosting (judges don't hit our FHIR), as long as we never hardcode FHIR URLs.
+
+**Action:** verify our `FHIR_BASE_URL` env var is only a fallback default and that SHARP headers always win. (Already true in `backend/mcp_server/context.py` — confirmed.)
+
+### Free LLM option
+
+Quote: *"to get you started, what you can do is you can use Google AI Studio... we recommend the Gemini 3.1 Flash Light"* (free Gmail-tier API key, paste into PO settings).
+
+So if the user wants to skip Anthropic / Groq billing, **Gemini Flash Light is the platform-default free option** for testing. For the demo recording, Claude or Groq still produces nicer SBAR prose, but there's no hard blocker.
+
+### Submission checklist (revised)
+
+Replaces the speculative items in `docs/SUBMISSION_LOG.md` §6:
+
+- [ ] Deploy MCP server to a public HTTPS URL (Render / GCP / etc.)
+- [ ] Deploy A2A agent to a public HTTPS URL with the AgentCard at `/.well-known/agent-card.json`
+- [ ] In `app.promptopinion.ai` Workspace Hub: add MCP, check "pass token", run Test
+- [ ] In Workspace Hub: Connect external agent, paste API key, toggle FHIR context
+- [ ] In Marketplace Studio: publish MCP server (one entry)
+- [ ] In Marketplace Studio: publish A2A agent (second entry)
+- [ ] Capture both Marketplace URLs → paste into Devpost submission
+- [ ] Confirm judges can hit both via the public dashboard test panel
+
+---
+
+*Original research notes preserved above for the historical record. Treat the **Confirmed Publishing Flow** section as the canonical reference for any submission-day work.*

@@ -497,7 +497,9 @@ backend/
 
 ---
 
-## 6. Publishing to Marketplace — Known / Unknown
+## 6. Publishing to Marketplace — CONFIRMED
+
+> **2026-04-22 update:** Darena Health's official "Agents Assemble Challenge — Getting Started" video confirms the publishing flow. **The "Unknown" section below is now resolved.** For the canonical step-by-step walkthrough see `docs/PO_PUBLISHING_RESEARCH.md` § "Confirmed Publishing Flow (from official video)". TL;DR: dashboard at `app.promptopinion.ai` → **Marketplace Studio** at the bottom of the left nav → Add → paste URL → publish.
 
 **Confirmed from repo + homepage:**
 - Agents register by providing the public agent-card URL (`https://<host>/.well-known/agent-card.json`) + an X-API-Key value to Prompt Opinion (`po-adk-python/README.md` §"Connecting to Prompt Opinion").
