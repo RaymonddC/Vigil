@@ -11,6 +11,7 @@ import {
   Legend,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
 
 export interface VitalsDataPoint {
@@ -68,23 +69,40 @@ const AXIS_LABELS: Record<AxisMode, string> = {
 
 // MEWT threshold reference lines — shown only when a single vital group is selected.
 // Source: CLINICAL_EVIDENCE.md §2.3 — Vigil 7-parameter MEWT implementation.
-const MEWT_REFS: Partial<Record<AxisMode, Array<{ value: number; label: string; stroke: string }>>> = {
+const MEWT_REFS: Partial<Record<AxisMode, Array<{ value: number; label: string; stroke: string; tier: 'warn' | 'crit' | 'info' }>>> = {
   bp: [
-    { value: 100, label: 'SBP ≤100', stroke: '#D97706' },
-    { value: 90,  label: 'SBP ≤90',  stroke: '#DC2626' },
+    { value: 100, label: 'SBP ≤100', stroke: '#D97706', tier: 'warn' },
+    { value: 90,  label: 'SBP ≤90',  stroke: '#DC2626', tier: 'crit' },
   ],
   'hr-rr': [
-    { value: 22,  label: 'RR ≥22',  stroke: '#0891B2' },
-    { value: 110, label: 'HR >110', stroke: '#D97706' },
-    { value: 130, label: 'HR >130', stroke: '#DC2626' },
+    { value: 22,  label: 'RR ≥22',  stroke: '#0891B2', tier: 'info' },
+    { value: 110, label: 'HR >110', stroke: '#D97706', tier: 'warn' },
+    { value: 130, label: 'HR >130', stroke: '#DC2626', tier: 'crit' },
   ],
   spo2: [
-    { value: 93, label: 'SpO₂ <93%', stroke: '#D97706' },
-    { value: 90, label: 'SpO₂ <90%', stroke: '#DC2626' },
+    { value: 93, label: 'SpO₂ <93%', stroke: '#D97706', tier: 'warn' },
+    { value: 90, label: 'SpO₂ <90%', stroke: '#DC2626', tier: 'crit' },
   ],
   temp: [
-    { value: 36.0, label: 'Temp <36°C', stroke: '#2563EB' },
-    { value: 38.0, label: 'Temp >38°C', stroke: '#D97706' },
+    { value: 36.0, label: 'Temp <36°C', stroke: '#2563EB', tier: 'info' },
+    { value: 38.0, label: 'Temp >38°C', stroke: '#D97706', tier: 'warn' },
+  ],
+};
+
+// Threshold bands — a soft horizontal stripe marking the danger zone above/below
+// each critical reference line. Opacity kept low so patient trace stays primary.
+const THRESHOLD_BANDS: Partial<Record<AxisMode, Array<{ y1: number; y2: number; fill: string }>>> = {
+  bp: [
+    { y1: 0, y2: 90, fill: '#FEE2E2' },
+  ],
+  'hr-rr': [
+    { y1: 130, y2: 200, fill: '#FEE2E2' },
+  ],
+  spo2: [
+    { y1: 0, y2: 90, fill: '#FEE2E2' },
+  ],
+  temp: [
+    { y1: 39, y2: 45, fill: '#FEE2E2' },
   ],
 };
 
@@ -99,6 +117,7 @@ export function VitalsChart({
   const [axis, setAxis] = useState<AxisMode>(initialAxis);
   const keys = AXIS_KEYS[axis];
   const refs = MEWT_REFS[axis] ?? [];
+  const bands = THRESHOLD_BANDS[axis] ?? [];
 
   return (
     <div className="space-y-3">
@@ -118,7 +137,7 @@ export function VitalsChart({
               'px-3 py-1 rounded-md text-xs font-medium transition-colors min-h-[32px]',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]',
               axis === mode
-                ? 'bg-[#0B5FFF] text-white'
+                ? 'bg-[#0B5FFF] text-white shadow-sm'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
             ].join(' ')}
           >
@@ -130,21 +149,23 @@ export function VitalsChart({
       {/* MEWT threshold legend — appears when a filtered axis is selected */}
       {refs.length > 0 && (
         <div
-          className="flex items-center gap-3 flex-wrap text-xs text-slate-500 dark:text-slate-400"
+          className="flex items-center gap-3 flex-wrap text-[11px] text-slate-500 dark:text-slate-400"
           aria-label="MEWT thresholds"
         >
-          <span className="font-medium shrink-0">MEWT thresholds:</span>
+          <span className="inline-flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-400 shrink-0 uppercase tracking-wider text-[10px]">
+            MEWT
+          </span>
           {refs.map((r) => (
-            <span key={r.label} className="flex items-center gap-1.5">
+            <span key={r.label} className="inline-flex items-center gap-1.5">
               <svg width="16" height="8" aria-hidden="true">
                 <line
                   x1="0" y1="4" x2="16" y2="4"
                   stroke={r.stroke}
                   strokeWidth="1.5"
-                  strokeDasharray="4 4"
+                  strokeDasharray="4 3"
                 />
               </svg>
-              <span style={{ color: r.stroke }}>{r.label}</span>
+              <span style={{ color: r.stroke }} className="font-medium">{r.label}</span>
             </span>
           ))}
         </div>
@@ -152,38 +173,64 @@ export function VitalsChart({
 
       {/* Recharts multi-line chart */}
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-          <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
+        <LineChart data={data} margin={{ top: 8, right: 20, left: -4, bottom: 8 }}>
+          <CartesianGrid stroke="#F1F5F9" strokeDasharray="2 4" vertical={false} />
+
+          {/* Danger-zone bands — rendered behind trace at low opacity */}
+          {bands.map((b, i) => (
+            <ReferenceArea
+              key={`band-${i}`}
+              y1={b.y1}
+              y2={b.y2}
+              fill={b.fill}
+              fillOpacity={0.35}
+              stroke="none"
+              ifOverflow="extendDomain"
+            />
+          ))}
+
           <XAxis
             dataKey="t"
-            stroke="#64748B"
-            fontSize={12}
+            stroke="#94A3B8"
+            fontSize={11}
+            tickLine={false}
+            axisLine={{ stroke: '#E2E8F0' }}
             tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
           />
           <YAxis
-            stroke="#64748B"
-            fontSize={12}
+            stroke="#94A3B8"
+            fontSize={11}
+            tickLine={false}
+            axisLine={false}
             tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
             width={40}
           />
           <Tooltip
+            cursor={{ stroke: '#CBD5E1', strokeDasharray: '3 3', strokeWidth: 1 }}
             contentStyle={{
-              background: '#fff',
+              background: '#FFFFFF',
               border: '1px solid #E2E8F0',
               borderRadius: 8,
               fontSize: 12,
               fontFamily: 'var(--font-geist-mono)',
+              boxShadow: '0 4px 12px -2px rgb(15 23 42 / 0.08)',
+              padding: '8px 10px',
             }}
-            labelStyle={{ color: '#0F172A', fontWeight: 600 }}
+            labelStyle={{ color: '#0F172A', fontWeight: 600, marginBottom: 4 }}
+            itemStyle={{ padding: '1px 0' }}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          formatter={(rawValue: any, name: any): [string, string] => {
+            formatter={(rawValue: any, name: any): [string, string] => {
               const n = typeof rawValue === 'number' ? rawValue : 0;
               const cfg = Object.values(VITAL_CONFIG).find((c) => c.name === name);
               const formatted = n % 1 !== 0 ? n.toFixed(1) : String(n);
               return [`${formatted}${cfg ? ` ${cfg.unit}` : ''}`, String(name)];
             }}
           />
-          <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-inter)' }} />
+          <Legend
+            wrapperStyle={{ fontSize: 11, fontFamily: 'var(--font-inter)', paddingTop: 8 }}
+            iconType="plainline"
+            iconSize={14}
+          />
 
           {/* MEWT threshold reference lines — dashed, color-coded */}
           {refs.map((ref) => (
@@ -191,8 +238,9 @@ export function VitalsChart({
               key={`mewt-${ref.value}`}
               y={ref.value}
               stroke={ref.stroke}
-              strokeDasharray="4 4"
-              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              strokeWidth={1}
+              strokeOpacity={ref.tier === 'crit' ? 0.9 : 0.6}
             />
           ))}
 
@@ -204,7 +252,7 @@ export function VitalsChart({
               stroke="#DC2626"
               strokeWidth={1.5}
               strokeDasharray="6 3"
-              label={{ value: '▲', position: 'insideTopLeft', fontSize: 11, fill: '#DC2626' }}
+              label={{ value: '▼', position: 'top', fontSize: 10, fill: '#DC2626' }}
             />
           ))}
 
@@ -217,6 +265,7 @@ export function VitalsChart({
               stroke={VITAL_CONFIG[key].stroke}
               strokeWidth={2}
               dot={false}
+              activeDot={{ r: 4, strokeWidth: 2, stroke: '#FFFFFF' }}
               name={VITAL_CONFIG[key].name}
               isAnimationActive={false}
             />
