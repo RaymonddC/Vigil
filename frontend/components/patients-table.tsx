@@ -350,7 +350,7 @@ function FilterPill({
       onClick={onClick}
       aria-pressed={active}
       className={[
-        "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors min-h-[36px]",
+        "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors min-h-[44px]",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]",
         active
           ? "bg-[#0B5FFF] text-white border-[#0B5FFF] shadow-sm"

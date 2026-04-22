@@ -100,9 +100,12 @@ def _find_antibiotic(
         # constitute a new treatment course for CDC ASE purposes; only empirical
         # / therapeutic antibiotics started during or after clinical deterioration
         # count. (Vigil operational choice — CLINICAL_EVIDENCE §4.1.)
-        if new_abx_since is not None and ma.effectiveDateTime is not None:
-            if ma.effectiveDateTime < new_abx_since:
-                continue
+        if (
+            new_abx_since is not None
+            and ma.effectiveDateTime is not None
+            and ma.effectiveDateTime < new_abx_since
+        ):
+            continue
         if ma.medicationCodeableConcept:
             for coding in ma.medicationCodeableConcept.coding:
                 code = coding.code or ""

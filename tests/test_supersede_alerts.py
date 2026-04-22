@@ -14,8 +14,9 @@ alerts after N ticks on the same patient.  These tests verify that:
 
 from __future__ import annotations
 
-import backend.api.review_queue as rq
 import pytest
+
+import backend.api.review_queue as rq
 from backend.api.review_queue import (
     count_superseded_alerts,
     count_unread_alerts,

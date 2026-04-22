@@ -499,7 +499,7 @@ function FilterPill({
       onClick={onClick}
       aria-pressed={active}
       className={[
-        'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md font-medium transition-colors min-h-[32px]',
+        'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md font-medium transition-colors min-h-[44px]',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]',
         mono ? 'font-[family-name:var(--font-geist-mono)]' : '',
         active

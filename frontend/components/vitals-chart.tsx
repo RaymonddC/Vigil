@@ -134,7 +134,7 @@ export function VitalsChart({
             onClick={() => setAxis(mode)}
             aria-pressed={axis === mode}
             className={[
-              'px-3 py-1 rounded-md text-xs font-medium transition-colors min-h-[32px]',
+              'px-3 py-1 rounded-md text-xs font-medium transition-colors min-h-[44px]',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]',
               axis === mode
                 ? 'bg-[#0B5FFF] text-white shadow-sm'
