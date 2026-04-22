@@ -149,6 +149,21 @@ function AlertCard({
           View vitals →
         </Link>
       </div>
+
+      {/* Superseded history footer — only shown when prior alerts were replaced */}
+      {(alert.superseded_count ?? 0) > 0 && (
+        <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50">
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            ↳{' '}
+            <Link
+              href={`/patients/${alert.patient_id}`}
+              className="hover:text-slate-600 dark:hover:text-slate-300 transition-colors underline underline-offset-2"
+            >
+              {alert.superseded_count} prior alert{alert.superseded_count !== 1 ? 's' : ''} superseded by re-ticks
+            </Link>
+          </p>
+        </div>
+      )}
     </div>
   );
 }

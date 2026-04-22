@@ -95,10 +95,26 @@ def enqueue_alert(
     model_used: str,
     communication_draft: dict[str, Any],
 ) -> str:
-    """Insert a new in-progress alert. Returns the generated alert id."""
+    """Supersede any open alerts for the patient, then insert a new in-progress alert.
+
+    Prior open alerts for the same patient are marked 'superseded' (not deleted)
+    to preserve the audit trail before the new alert is enqueued. Both operations
+    run in one transaction, keeping the queue at most one in-progress alert per
+    patient at any time. Returns the generated alert id.
+    """
     alert_id = f"alert-{uuid.uuid4().hex[:8]}"
     now = datetime.now(UTC).isoformat()
     with _conn() as con:
+        # Atomically supersede all currently-open alerts for this patient so
+        # there is no window where zero or multiple live alerts exist.
+        con.execute(
+            """
+            UPDATE alerts
+            SET status = 'superseded', updated_at = ?
+            WHERE patient_id = ? AND status IN ('in-progress', 'in-progress-writing')
+            """,
+            (now, patient_id),
+        )
         con.execute(
             """
             INSERT INTO alerts
@@ -120,6 +136,28 @@ def enqueue_alert(
             ),
         )
     return alert_id
+
+
+def supersede_prior_alerts(patient_id: str) -> int:
+    """Mark all open in-progress alerts for *patient_id* as 'superseded'.
+
+    This is called automatically inside enqueue_alert (atomically in the same
+    transaction). It is also exposed as a standalone function for unit tests and
+    any future admin tooling.
+
+    Returns the number of rows flipped to 'superseded' (0 if none were open).
+    """
+    now = datetime.now(UTC).isoformat()
+    with _conn() as con:
+        cur = con.execute(
+            """
+            UPDATE alerts
+            SET status = 'superseded', updated_at = ?
+            WHERE patient_id = ? AND status IN ('in-progress', 'in-progress-writing')
+            """,
+            (now, patient_id),
+        )
+        return cur.rowcount
 
 
 def claim_alert_for_writing(alert_id: str) -> dict[str, Any] | None:
@@ -244,6 +282,19 @@ def count_unread_alerts(patient_id: str) -> int:
             """
             SELECT COUNT(*) FROM alerts
             WHERE patient_id = ? AND status = 'in-progress'
+            """,
+            (patient_id,),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def count_superseded_alerts(patient_id: str) -> int:
+    """Count superseded alerts for a patient (used by /api/alerts to show history context)."""
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT COUNT(*) FROM alerts
+            WHERE patient_id = ? AND status = 'superseded'
             """,
             (patient_id,),
         ).fetchone()

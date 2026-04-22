@@ -278,6 +278,8 @@ export const QueueAlertSchema = z.object({
   clinician_id: z.string().nullable().optional(),
   note: z.string().nullable().optional(),
   audit_id: z.string().nullable().optional(),
+  /** Number of prior alerts for this patient replaced by re-ticks (audit trail). */
+  superseded_count: z.number().optional().default(0),
 });
 export type QueueAlert = z.infer<typeof QueueAlertSchema>;
 

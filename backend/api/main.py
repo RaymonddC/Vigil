@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.review_queue import init_db, list_pending_alerts
+from backend.api.review_queue import count_superseded_alerts, init_db, list_pending_alerts
 from backend.api.routes.patients import (
     approve_alert_action,
     get_latest_patient_alert_action,
@@ -219,8 +219,18 @@ async def approve_alert(
 
 @app.get("/api/alerts")
 async def list_alerts() -> dict[str, Any]:
-    """All in-progress alerts across all patients (for Alerts view FE4)."""
+    """All in-progress alerts across all patients (for Alerts view FE4).
+
+    Each alert is enriched with ``superseded_count`` — the number of prior
+    alerts for that patient that have been superseded by re-ticks — so the
+    frontend can surface "N prior alerts superseded" context without a
+    separate query.
+    """
     alerts = await asyncio.to_thread(list_pending_alerts)
+    for alert in alerts:
+        alert["superseded_count"] = await asyncio.to_thread(
+            count_superseded_alerts, alert["patient_id"]
+        )
     return {"alerts": alerts}
 
 
