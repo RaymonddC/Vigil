@@ -14,8 +14,10 @@ export const metadata: Metadata = {
   title: "System Status — Vigil",
 };
 
-// Revalidate every 30s so health indicators stay fresh without full reload
-export const revalidate = 30;
+// Force dynamic rendering — fetches from backend at request time, never at
+// build time. Otherwise Next.js tries to pre-render statically and blocks
+// the docker build with a 60s fetch timeout when the backend isn't up yet.
+export const dynamic = "force-dynamic";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 

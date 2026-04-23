@@ -7,6 +7,11 @@ import type { RiskLevel } from '@/lib/risk';
 import { isHighOrAbove } from '@/lib/risk';
 import { getPatient, getLatestAlert } from '@/lib/api';
 
+// Force dynamic rendering — backend fetch runs per-request, never at
+// build time. Otherwise docker build pre-renders and blocks on a 60s
+// fetch timeout when backend isn't up.
+export const dynamic = "force-dynamic";
+
 // ─── API response types ────────────────────────────────────────────────────
 
 interface VitalSeries {

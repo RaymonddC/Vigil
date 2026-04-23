@@ -6,12 +6,12 @@ export const metadata = {
 };
 
 /**
- * Revalidate this route segment every 15 s so latest_risk_band and
- * unread_alerts stay reasonably fresh without a hard reload.  The
- * Timeline page's "Tick Now" button also calls router.refresh() on
- * success to bust the Next.js router cache immediately.  FRONTEND_SPEC §3.1
+ * Force dynamic rendering — RSC fetch runs per-request, never at build
+ * time. Otherwise docker build blocks pre-rendering this page when the
+ * backend isn't up yet. Router cache + Timeline's router.refresh() on
+ * Tick Now keep data fresh without a hard reload. FRONTEND_SPEC §3.1
  */
-export const revalidate = 15;
+export const dynamic = "force-dynamic";
 
 /**
  * Server Component: fetches patient list from FastAPI backend.
