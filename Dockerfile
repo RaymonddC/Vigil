@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir uv==0.4.29
 COPY pyproject.toml uv.lock ./
 
 # Install runtime deps only (no dev extras)
-RUN uv sync --frozen --no-dev --all-extras
+RUN uv sync --frozen --no-dev --no-install-project --all-extras
 
 # Copy application source
 COPY backend/ backend/
