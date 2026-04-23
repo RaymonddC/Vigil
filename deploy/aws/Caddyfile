@@ -1,0 +1,71 @@
+# Vigil — Caddy reverse proxy (AWS EC2 single-host deploy)
+#
+# Three deploy postures:
+#   a) SITE_DOMAIN=vigil.example.com   — user's own domain, A record → EC2 IP.
+#      Caddy obtains a Let's Encrypt cert via HTTP-01. Production path.
+#   b) SITE_DOMAIN=1-2-3-4.sslip.io    — no domain needed, sslip.io resolves
+#      `N-N-N-N.sslip.io` to N.N.N.N. Let's Encrypt issues against that FQDN.
+#      Recommended free path for the hackathon.
+#   c) SITE_DOMAIN=:80                 — plain HTTP only, no TLS. Will NOT
+#      work for Prompt Opinion Marketplace (they require HTTPS). Only use
+#      for local compose testing.
+#
+# `{$SITE_DOMAIN}` is substituted from the docker-compose `environment:` block
+# at container start, which in turn reads .env.
+
+{$SITE_DOMAIN} {
+    # --- TLS ---------------------------------------------------------------
+    # Caddy's default: on for real hostnames, off for `:80`. No config needed.
+
+    # --- Access + error logs ----------------------------------------------
+    log {
+        output stdout
+        format console
+    }
+    encode zstd gzip
+
+    # ----------------------------------------------------------------------
+    # A2A — AgentCard must be at root-level /.well-known/agent-card.json
+    # (A2A spec requires well-known path). All /a2a/* JSON-RPC also routes
+    # to the A2A service.
+    # ----------------------------------------------------------------------
+    handle /.well-known/agent-card.json {
+        reverse_proxy a2a:9000
+    }
+
+    handle /a2a* {
+        reverse_proxy a2a:9000
+    }
+
+    # ----------------------------------------------------------------------
+    # MCP — Prompt Opinion runtime calls this. Streamable HTTP transport,
+    # so Caddy must not buffer responses (reverse_proxy default is fine).
+    # ----------------------------------------------------------------------
+    handle /mcp* {
+        reverse_proxy mcp:7001 {
+            flush_interval -1
+        }
+    }
+
+    # Health + OpenAPI exposed by the MCP service itself (not gated by
+    # the API key middleware) — keep them routed to mcp even though they
+    # are not under /mcp*.
+    handle /health {
+        reverse_proxy mcp:7001
+    }
+
+    # ----------------------------------------------------------------------
+    # API — FastAPI proxy. Dashboard client calls /api/* same-origin.
+    # ----------------------------------------------------------------------
+    handle /api* {
+        reverse_proxy api:8000
+    }
+
+    # ----------------------------------------------------------------------
+    # Frontend — Next.js prod server handles everything else (pages, _next
+    # static assets, favicon, etc.).
+    # ----------------------------------------------------------------------
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

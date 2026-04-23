@@ -22,6 +22,7 @@ network** (cloud) — never behind a public route or tunnel.
 **Which option should I pick?**
 
 - Free, no credit card, permanent URL → **Option E (Render.com, fixture mode)**. Recommended for most hackathon teams.
+- Have the $100 AWS credit, want HAPI persistence + single domain → **Option F (AWS EC2 c7i-flex.large)**. Full stack on one box, ~$33 for a 17-day judging window.
 - Need HAPI persistence and willing to spend ~$10/mo → Option D (GCP Cloud Run) or Option B (Fly.io).
 - Laptop-local demo only → Option A (tunnel).
 
@@ -274,6 +275,42 @@ breakdown):
 - Services sleep after 15 min idle; cold start is ~60 s. UptimeRobot (free)
   keeps them warm during the demo window.
 - Frontend deploys to Vercel, not Render (Vercel is a better Next.js host).
+
+---
+
+## Option F — AWS EC2 c7i-flex.large (recommended for users with $100+ credit)
+
+All four backend services + HAPI + frontend on a **single 4 GB Intel
+EC2 instance**, fronted by Caddy with auto Let's Encrypt. Unlike Options
+B/D/E, everything lives behind one domain (`https://<site>/mcp`,
+`/.well-known/agent-card.json`, `/api/*`, `/`), which makes the Prompt
+Opinion listing trivial and keeps HAPI persistent.
+
+Configs live under `deploy/aws/`:
+
+- [`deploy/aws/user-data.sh`](../deploy/aws/user-data.sh) — cloud-init
+  bootstrap (installs Docker, clones the repo, generates
+  `VIGIL_API_KEY`, brings the stack up).
+- [`deploy/aws/Caddyfile`](../deploy/aws/Caddyfile) — reverse proxy
+  routing for `/mcp`, `/a2a`, `/.well-known/agent-card.json`, `/api`,
+  `/*`.
+- [`deploy/aws/README.md`](../deploy/aws/README.md) — full step-by-step
+  runbook (launch, DNS options, verify, register with Prompt Opinion,
+  stop/start, teardown, credit monitoring).
+
+Cost summary:
+
+| Window | Compute (c7i-flex.large) | Storage (30 GB gp3) | Total |
+|---|---|---|---|
+| Always-on, 30 days | ~$55 | ~$2.40 | ~$58/mo |
+| Always-on, 17-day judging window | ~$31 | ~$1.40 | **~$33** |
+| Stopped, with 30 GB EBS retained | $0 | ~$2.40/mo | ~$2.40/mo |
+
+Well inside the $100 credit with headroom for testing. HAPI stays off
+the public network (SEC-10) — only ports 80 and 443 open on the
+security group.
+
+See [`deploy/aws/README.md`](../deploy/aws/README.md) for the full runbook.
 
 ---
 

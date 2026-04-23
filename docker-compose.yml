@@ -1,4 +1,21 @@
-version: "3.9"
+# -----------------------------------------------------------------------------
+# Vigil — full single-host stack (used by the AWS EC2 deploy, deploy/aws/).
+#
+# Services on an internal docker network:
+#   hapi-db   — postgres for HAPI (internal)
+#   hapi      — HAPI FHIR R4 server, bound to 127.0.0.1:8080 on the host only
+#   mcp       — SERVICE=mcp, FastAPI/FastMCP on :7001
+#   a2a       — SERVICE=a2a, A2A agent on :9000 (AgentCard served here)
+#   api       — SERVICE=api, FastAPI proxy on :8000 (dashboard API + approve)
+#   frontend  — Next.js prod build on :3000
+#   caddy     — reverse proxy on :80/:443, auto Let's Encrypt, routes to the
+#               four app services above. This is the ONLY publicly exposed
+#               service. See deploy/aws/Caddyfile for routing.
+#
+# HAPI stays off the public network (SEC-10). Only ports 80 and 443 need to
+# be open on the EC2 security group; the 127.0.0.1:8080 mapping on hapi is
+# for SSH-local debugging and is not reachable from the public internet.
+# -----------------------------------------------------------------------------
 
 services:
   hapi-db:
@@ -20,6 +37,9 @@ services:
   hapi:
     image: hapiproject/hapi:v7.2.0
     container_name: vigil-hapi
+    # SEC-10: bind to loopback only. Internal docker network lets peers
+    # reach the container by service name (hapi:8080); the host-port
+    # binding here is ONLY for ssh-port-forwarded debugging from a laptop.
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -51,6 +71,145 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # MCP server — 4 clinical tools. Prompt Opinion runtime calls this service
+  # through Caddy at https://<SITE_DOMAIN>/mcp. Internal only on the docker
+  # network; Caddy terminates TLS and proxies.
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vigil-backend:latest
+    container_name: vigil-mcp
+    environment:
+      SERVICE: mcp
+      MCP_PORT: "7001"
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
+      FHIR_BASE_URL: http://hapi:8080/fhir
+      ALLOWED_FHIR_HOSTS: http://hapi:8080/fhir,http://localhost:8080/fhir
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${SITE_DOMAIN:-localhost}}
+      CACHE_TTL_SEC: "300"
+      LOG_LEVEL: INFO
+    depends_on:
+      hapi:
+        condition: service_healthy
+    expose:
+      - "7001"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # A2A agent — AgentCard + JSON-RPC. A2A_PUBLIC_URL is the public URL that
+  # lands in the AgentCard so external agents can call back.
+  # ---------------------------------------------------------------------------
+  a2a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vigil-backend:latest
+    container_name: vigil-a2a
+    environment:
+      SERVICE: a2a
+      A2A_PORT: "9000"
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
+      MCP_BASE_URL: http://mcp:7001
+      FHIR_BASE_URL: http://hapi:8080/fhir
+      A2A_PUBLIC_URL: ${A2A_PUBLIC_URL:-https://${SITE_DOMAIN:-localhost}}
+      POLL_INTERVAL_SEC: "900"
+      LOG_LEVEL: INFO
+    depends_on:
+      hapi:
+        condition: service_healthy
+    expose:
+      - "9000"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # FastAPI proxy — dashboard API + approve (FHIR write path).
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vigil-backend:latest
+    container_name: vigil-api
+    environment:
+      SERVICE: api
+      API_PORT: "8000"
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
+      FHIR_BASE_URL: http://hapi:8080/fhir
+      A2A_AGENT_URL: http://a2a:9000
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${SITE_DOMAIN:-localhost}}
+      LOG_LEVEL: INFO
+    depends_on:
+      hapi:
+        condition: service_healthy
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Next.js frontend — server-rendered app. Hits the api service internally
+  # via BACKEND_URL for RSC, and same-origin /api via Caddy for client calls.
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty = same-origin /api, routed by Caddy to api:8000.
+        NEXT_PUBLIC_API_BASE_URL: ""
+    image: vigil-frontend:latest
+    container_name: vigil-frontend
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Server-side calls (RSC, /api/[...path] proxy) go direct to the api
+      # container over the internal docker network.
+      BACKEND_URL: http://api:8000
+    depends_on:
+      - api
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Caddy reverse proxy — terminates TLS and routes to the four app services.
+  # Auto Let's Encrypt via ACME HTTP-01 (requires ports 80 + 443 open).
+  # Set SITE_DOMAIN in .env to the hostname you want certs issued for.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: vigil-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-:80}
+    volumes:
+      - ./deploy/aws/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - mcp
+      - a2a
+      - api
+      - frontend
+    restart: unless-stopped
+
 volumes:
   hapi-db-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
     driver: local

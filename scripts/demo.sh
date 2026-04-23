@@ -81,7 +81,9 @@ stop_services 2>/dev/null || true
 
 log "Step 1/6: Starting HAPI FHIR..."
 cd "$PROJECT_ROOT"
-docker compose up -d
+# Only bring up the FHIR store; the other compose services are for the
+# AWS single-host deploy and aren't needed for local demo.
+docker compose up -d hapi-db hapi
 
 log "  Waiting for HAPI FHIR at localhost:$HAPI_PORT..."
 DEADLINE=$((SECONDS + 120))

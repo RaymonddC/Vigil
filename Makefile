@@ -1,8 +1,11 @@
 .PHONY: up down seed dev mcp agent test lint ci demo demo-stop demo-warmup e2e
 
-# Infrastructure
+# Infrastructure — local dev only spins up HAPI + its DB. The other
+# services (mcp, a2a, api, frontend, caddy) are defined in compose for
+# the single-host AWS deploy (deploy/aws/) and are driven per-service in
+# dev via `make mcp`, `make agent`, `make proxy`, `make frontend`.
 up:
-	docker compose up -d
+	docker compose up -d hapi-db hapi
 	@echo "Waiting for HAPI FHIR..."
 	@until curl -sf http://localhost:8080/fhir/metadata > /dev/null 2>&1; do sleep 2; done
 	@echo "HAPI FHIR ready at http://localhost:8080/fhir"
