@@ -86,12 +86,22 @@ async def _ensure_vigil_referenced_resources(
         },
     )
 
-    # PractitionerRole(s) referenced in Communication.recipient
+    # PractitionerRole(s) referenced in Communication.recipient.
+    # HAPI-0521: FHIR logical IDs allow letters, digits, '-', '.' only (no
+    # underscores). Draft-side references like "PractitionerRole/charge_nurse"
+    # — leftover from older drafts or any other emitter — get normalized to
+    # "charge-nurse" here in-place so the POST Communication won't bounce.
     for ref in communication.get("recipient", []) or []:
-        target = (ref or {}).get("reference") or ""
+        if not isinstance(ref, dict):
+            continue
+        target = ref.get("reference") or ""
         if not target.startswith("PractitionerRole/"):
             continue
-        role_id = target.split("/", 1)[1]
+        raw_id = target.split("/", 1)[1]
+        role_id = raw_id.replace("_", "-")
+        if role_id != raw_id:
+            ref["reference"] = f"PractitionerRole/{role_id}"
+        display_key = raw_id  # enum lookup still uses the snake-case variant
         await client.put_resource(
             "PractitionerRole",
             role_id,
@@ -102,9 +112,9 @@ async def _ensure_vigil_referenced_resources(
                         "coding": [
                             {
                                 "system": "http://vigil.local/practitioner-role",
-                                "code": role_id,
+                                "code": display_key,
                                 "display": _PRACTITIONER_ROLE_DISPLAY.get(
-                                    role_id, role_id.replace("_", " ").title()
+                                    display_key, role_id.replace("-", " ").title()
                                 ),
                             }
                         ]

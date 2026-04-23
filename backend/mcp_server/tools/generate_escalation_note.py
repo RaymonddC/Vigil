@@ -230,7 +230,10 @@ def _build_communication_draft(
         },
         "recipient": [
             {
-                "reference": f"PractitionerRole/{recipient_role}",
+                # FHIR logical IDs allow only letters/digits/-/. so convert
+                # our Python-snake-case enum (e.g. charge_nurse) to kebab-case
+                # (charge-nurse) for the resource id. HAPI rejects underscores.
+                "reference": f"PractitionerRole/{recipient_role.replace('_', '-')}",
                 "display": role_display.get(recipient_role, recipient_role),
             }
         ],
