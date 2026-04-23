@@ -35,6 +35,14 @@ services:
       "hapi.fhir.allow_multiple_delete": "true"
       "hapi.fhir.reuse_cached_search_results_millis": "0"
       "hapi.fhir.default_encoding": "JSON"
+      # Demo posture: don't reject writes for missing cross-resource
+      # references. The approve flow still does idempotent PUTs for the
+      # vigil Device + PractitionerRole, but any new reference we add
+      # later won't break the write until someone updates the ensure list.
+      # Real hospital deployments would leave these ON and manage integrity
+      # via a staging step. See SECURITY_REVIEW.md for production posture.
+      "hapi.fhir.enforce_referential_integrity_on_write": "false"
+      "hapi.fhir.enforce_referential_integrity_on_delete": "false"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/fhir/metadata > /dev/null"]
       interval: 15s

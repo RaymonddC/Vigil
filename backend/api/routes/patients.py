@@ -42,6 +42,78 @@ def _make_fhir_context(fhir_base_url: str) -> FhirContext:
     return FhirContext(url=fhir_base_url, token=None)
 
 
+# Display labels for the 4 recipient roles the SBAR can target.
+_PRACTITIONER_ROLE_DISPLAY = {
+    "charge_nurse":   "Charge Nurse",
+    "resident":       "Resident on call",
+    "attending":      "Attending physician",
+    "rapid_response": "Rapid Response Team",
+}
+
+
+async def _ensure_vigil_referenced_resources(
+    client: FhirClient, communication: dict[str, Any]
+) -> None:
+    """Idempotently PUT every resource the Communication references.
+
+    HAPI enforces referential integrity by default — Communication.sender,
+    Communication.recipient[*], and the AuditEvent.source.observer all need
+    their target resources to exist or the POST fails with HAPI-1094.
+
+    This helper PUTs the Vigil Device once and any PractitionerRole referenced
+    in Communication.recipient. Patient and Encounter come from synthetic seed
+    so they always exist. Same ids every call → safe to invoke per request.
+    """
+    # Vigil agent Device — referenced by sender + AuditEvent.source.observer
+    await client.put_resource(
+        "Device",
+        "vigil-postop-sentinel",
+        {
+            "deviceName": [
+                {"name": "Vigil Postop Sentinel", "type": "user-friendly-name"}
+            ],
+            "manufacturer": "Vigil (Agents Assemble 2026)",
+            "modelNumber": "v0.1.0",
+            "type": {
+                "coding": [
+                    {
+                        "system": "http://snomed.info/sct",
+                        "code": "706689003",
+                        "display": "Application program software",
+                    }
+                ]
+            },
+        },
+    )
+
+    # PractitionerRole(s) referenced in Communication.recipient
+    for ref in communication.get("recipient", []) or []:
+        target = (ref or {}).get("reference") or ""
+        if not target.startswith("PractitionerRole/"):
+            continue
+        role_id = target.split("/", 1)[1]
+        await client.put_resource(
+            "PractitionerRole",
+            role_id,
+            {
+                "active": True,
+                "code": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://vigil.local/practitioner-role",
+                                "code": role_id,
+                                "display": _PRACTITIONER_ROLE_DISPLAY.get(
+                                    role_id, role_id.replace("_", " ").title()
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+
+
 def _patient_display_name(patient: Any) -> str:
     if patient.name:
         n = patient.name[0]
@@ -313,6 +385,11 @@ async def approve_alert_action(
     # POST Communication → HAPI; revert lock on failure so a retry can proceed
     try:
         async with FhirClient(ctx) as client:
+            # Ensure HAPI referential integrity: Communication.sender,
+            # Communication.recipient, and AuditEvent.source.observer all
+            # reference resources HAPI rejects with HAPI-1094 if missing.
+            # Idempotent PUTs — same id every call, safe per request.
+            await _ensure_vigil_referenced_resources(client, comm_draft)
             comm_response = await client.post_resource("Communication", comm_draft)
     except FhirClientError:
         await asyncio.to_thread(revert_alert_to_in_progress, alert_id)

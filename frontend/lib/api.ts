@@ -228,7 +228,19 @@ export async function ackAlert(
       note: "Acknowledged, RRT dispatched.",
     }),
   });
-  if (!res.ok) throw new Error("approve failed");
+  if (!res.ok) {
+    // Surface the server's specific reason (superseded / already-approved /
+    // FHIR write failed) so the toast tells the clinician what to do next.
+    let detail = `approve failed (HTTP ${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = String(body.detail);
+      else if (body?.error) detail = String(body.error);
+    } catch {
+      /* response body wasn't JSON; keep the default detail */
+    }
+    throw new Error(detail);
+  }
   const data = await res.json();
   return ApproveResponseSchema.parse(data);
 }

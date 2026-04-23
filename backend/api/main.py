@@ -216,14 +216,25 @@ async def approve_alert(
     """
     from backend.api.review_queue import get_alert
 
-    # Pre-flight checks
+    # Pre-flight checks — give specific errors for each impossible state
     alert = await asyncio.to_thread(get_alert, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
     if alert.get("patient_id") != patient_id:
         raise HTTPException(status_code=404, detail="Alert not found for this patient")
-    if alert.get("status") == "completed":
+    status = alert.get("status")
+    if status == "completed":
         raise HTTPException(status_code=409, detail="Alert already approved")
+    if status == "superseded":
+        # A re-tick generated a newer alert for this patient. Tell the client
+        # to refresh — they're looking at a stale copy.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Alert was superseded by a newer one. Refresh the alerts page "
+                "to see the current alert for this patient."
+            ),
+        )
 
     try:
         return await approve_alert_action(

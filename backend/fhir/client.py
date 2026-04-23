@@ -185,3 +185,25 @@ class FhirClient:
                 status_code=resp.status_code,
             )
         return resp.json()
+
+    async def put_resource(
+        self, resource_type: str, resource_id: str, resource: dict
+    ) -> dict:
+        """PUT a FHIR resource at a known id (idempotent upsert).
+
+        Used to ensure the Vigil agent Device exists before approve writes
+        Communication / AuditEvent that reference it. Same id every call =
+        safe to invoke per request.
+        """
+        url = f"{self._base}/{resource_type}/{resource_id}"
+        resp = await self._client.put(
+            url,
+            json={**resource, "id": resource_id, "resourceType": resource_type},
+            headers={"Content-Type": "application/fhir+json"},
+        )
+        if resp.status_code >= 400:
+            raise FhirClientError(
+                f"FHIR PUT {resource_type}/{resource_id} error {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
+        return resp.json()
