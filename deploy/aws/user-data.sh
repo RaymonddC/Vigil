@@ -38,7 +38,7 @@ GROQ_API_KEY="${GROQ_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 
 # Vigil repo — public GitHub. Override if you fork.
-VIGIL_REPO="${VIGIL_REPO:-https://github.com/raymondchrisandy/vigil.git}"
+VIGIL_REPO="${VIGIL_REPO:-https://github.com/RaymonddC/Vigil.git}"
 VIGIL_BRANCH="${VIGIL_BRANCH:-main}"
 VIGIL_DIR="/opt/vigil"
 # ---------------------------------------------------------------------------
