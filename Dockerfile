@@ -22,15 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 # Install uv
 RUN pip install --no-cache-dir uv==0.4.29
 
-# Copy dependency manifest first for layer caching.
-# README.md is listed as `readme = "README.md"` in pyproject.toml — the
-# build backend (hatchling) opens it when uv materializes the project,
-# so it must be present in the image even though we pass
-# --no-install-project at build time. `uv run` at container start also
-# re-validates the workspace and fails without it.
+# Copy dependency manifest first for layer caching. README.md is
+# referenced by pyproject.toml's `readme = "README.md"`, so hatchling
+# needs it present during uv sync.
 COPY pyproject.toml uv.lock README.md ./
 
-# Install runtime deps only (no dev extras)
+# Install third-party deps into /app/.venv (no dev extras, project itself
+# deferred — it needs backend/ on disk).
 RUN uv sync --frozen --no-dev --no-install-project --all-extras
 
 # Copy application source
@@ -40,23 +38,42 @@ COPY backend/ backend/
 # layer is <1 MB and keeping a single image makes deploys simpler)
 COPY data/ data/
 
-# Non-root user for container security
-RUN adduser --disabled-password --gecos "" vigil
+# Install the vigil project itself as a proper non-editable wheel into the
+# venv so `backend.*` imports resolve from site-packages instead of relying
+# on uvicorn's CWD→sys.path side effect. This is the canonical uv production
+# pattern (docs.astral.sh/uv/guides/integration/docker/).
+RUN uv sync --frozen --no-dev --no-editable --all-extras
+
+# Non-root user for container security. Chown /app so the runtime user can
+# write into .venv (uv metadata + cache) and backend/api/ (SQLite DB fallback
+# path), and create the volume mount-point for the review queue (see F2).
+RUN adduser --disabled-password --gecos "" vigil \
+    && mkdir -p /var/lib/vigil \
+    && chown -R vigil:vigil /app /var/lib/vigil
 USER vigil
+
+# Put the venv's bin on PATH so `uvicorn` resolves to /app/.venv/bin/uvicorn
+# without an absolute path in CMD.
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # Expose all service ports; the active one depends on SERVICE env var
 EXPOSE 7001 8000 8080 9000
 
-# Entry point dispatcher — reads SERVICE env var
+# Entry point dispatcher — reads SERVICE env var.
+# Invokes uvicorn directly from the pre-built venv rather than via
+# `uv run`. `uv run` re-validates the workspace at startup and tries
+# to install the project as an editable wheel, which fails with
+# `Permission denied` because the vigil user can't write into a
+# root-owned .venv. The deps are already installed — just run them.
 CMD ["sh", "-c", "\
   case \"$SERVICE\" in \
-    mcp)     exec uv run uvicorn backend.mcp_server.server:app \
+    mcp)     exec uvicorn backend.mcp_server.server:app \
                  --host 0.0.0.0 --port ${MCP_PORT:-7001} ;; \
-    a2a)     exec uv run uvicorn backend.a2a_agent.app:app \
+    a2a)     exec uvicorn backend.a2a_agent.app:app \
                  --host 0.0.0.0 --port ${A2A_PORT:-9000} ;; \
-    api)     exec uv run uvicorn backend.api.main:app \
+    api)     exec uvicorn backend.api.main:app \
                  --host 0.0.0.0 --port ${API_PORT:-8000} ;; \
-    fixture) exec uv run uvicorn backend.fhir_fixture.main:app \
+    fixture) exec uvicorn backend.fhir_fixture.main:app \
                  --host 0.0.0.0 --port ${FIXTURE_PORT:-8080} ;; \
     *)    echo \"ERROR: SERVICE must be mcp | a2a | api | fixture (got: $SERVICE)\"; exit 1 ;; \
   esac"]

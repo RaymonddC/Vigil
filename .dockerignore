@@ -1,0 +1,54 @@
+# Keep the build context small and prevent dev-only state from leaking
+# into any of the images (Dockerfile, frontend/Dockerfile, Dockerfile.hapi).
+
+# Git + CI
+.git
+.github
+
+# Python virtual envs + caches (we create a clean .venv inside the image)
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# Node / Next.js — the frontend build stage recreates these
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/test-results
+frontend/playwright-report
+
+# Local dev state that must NEVER be baked into prod images
+.env
+.env.*
+!.env.example
+backend/api/review_queue.db
+*.log
+
+# Tests and docs — not needed at runtime
+tests
+docs
+*.md
+!README.md
+
+# Editor / OS metadata
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Demo runtime artefacts
+.demo-logs
+.demo-pids
+
+# Alternate-target configs not relevant to the AWS compose build
+deploy/fly.*.toml
+deploy/render
+deploy/gcp
+render.yaml
