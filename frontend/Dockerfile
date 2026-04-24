@@ -45,6 +45,11 @@ RUN pnpm build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Next.js 16 reads HOSTNAME + PORT from env natively. Passing them as
+# CLI args via `pnpm start -- --hostname ...` breaks: next start treats
+# the first positional arg as a project directory, so the old command
+# errored with `no such directory: /app/--hostname`.
+ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -61,4 +66,4 @@ COPY --from=build --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
 USER nextjs
 EXPOSE 3000
 
-CMD ["pnpm", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["pnpm", "start"]

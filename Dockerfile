@@ -22,8 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 # Install uv
 RUN pip install --no-cache-dir uv==0.4.29
 
-# Copy dependency manifest first for layer caching
-COPY pyproject.toml uv.lock ./
+# Copy dependency manifest first for layer caching.
+# README.md is listed as `readme = "README.md"` in pyproject.toml — the
+# build backend (hatchling) opens it when uv materializes the project,
+# so it must be present in the image even though we pass
+# --no-install-project at build time. `uv run` at container start also
+# re-validates the workspace and fails without it.
+COPY pyproject.toml uv.lock README.md ./
 
 # Install runtime deps only (no dev extras)
 RUN uv sync --frozen --no-dev --no-install-project --all-extras
