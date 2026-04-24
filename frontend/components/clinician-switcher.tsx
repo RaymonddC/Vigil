@@ -13,6 +13,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -86,39 +87,43 @@ export function ClinicianSwitcher() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-[240px]">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Signed in as
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {CLINICIANS.map((c) => {
-          const active = c.id === selectedId;
-          return (
-            <DropdownMenuItem
-              key={c.id}
-              onClick={() => handleSelect(c.id)}
-              aria-label={`Switch to ${c.name}, ${c.role}`}
-              className="flex items-start gap-2 py-1.5"
-            >
-              {/* Fixed-width check slot so rows don't shift when active changes. */}
-              <span
-                aria-hidden="true"
-                className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center"
+        {/* Base UI 1.4 requires GroupLabel to live inside a Group — rendering
+            the label bare throws MenuGroupRootContext error #31 on open. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Signed in as
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {CLINICIANS.map((c) => {
+            const active = c.id === selectedId;
+            return (
+              <DropdownMenuItem
+                key={c.id}
+                onClick={() => handleSelect(c.id)}
+                aria-label={`Switch to ${c.name}, ${c.role}`}
+                className="flex items-start gap-2 py-1.5"
               >
-                {active ? (
-                  <Check className="h-4 w-4 text-[#0B5FFF]" />
-                ) : null}
-              </span>
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-medium text-slate-900 dark:text-slate-50">
-                  {c.name}
+                {/* Fixed-width check slot so rows don't shift when active changes. */}
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center"
+                >
+                  {active ? (
+                    <Check className="h-4 w-4 text-[#0B5FFF]" />
+                  ) : null}
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {c.role}
+                <span className="flex flex-col leading-tight">
+                  <span className="text-sm font-medium text-slate-900 dark:text-slate-50">
+                    {c.name}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {c.role}
+                  </span>
                 </span>
-              </span>
-            </DropdownMenuItem>
-          );
-        })}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
