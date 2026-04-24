@@ -55,10 +55,16 @@
     }
 
     # ----------------------------------------------------------------------
-    # API — FastAPI proxy. Dashboard client calls /api/* same-origin.
+    # API — route through the Next.js server, NOT direct to api:8000.
+    # The frontend's /api/[...path]/route.ts is the single server-side
+    # chokepoint that injects X-API-Key before forwarding to api:8000.
+    # Browser-side fetches (/api/alerts, /api/events/tail, SSE, etc.)
+    # land here, hit the Next.js proxy, and get the key server-side —
+    # keeping VIGIL_API_KEY out of browser JS (FE5 design).
+    # Going direct to api:8000 would 401 every browser call.
     # ----------------------------------------------------------------------
     handle /api* {
-        reverse_proxy api:8000
+        reverse_proxy frontend:3000
     }
 
     # ----------------------------------------------------------------------
