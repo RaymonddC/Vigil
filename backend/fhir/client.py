@@ -203,7 +203,8 @@ class FhirClient:
         )
         if resp.status_code >= 400:
             raise FhirClientError(
-                f"FHIR PUT {resource_type}/{resource_id} error {resp.status_code}: {resp.text[:200]}",
+                f"FHIR PUT {resource_type}/{resource_id} error "
+                f"{resp.status_code}: {resp.text[:200]}",
                 status_code=resp.status_code,
             )
         return resp.json()
