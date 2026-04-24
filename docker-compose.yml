@@ -64,7 +64,9 @@ services:
       "hapi.fhir.enforce_referential_integrity_on_write": "false"
       "hapi.fhir.enforce_referential_integrity_on_delete": "false"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/fhir/metadata > /dev/null"]
+      # HAPI image doesn't ship curl/wget. Use bash's /dev/tcp to check
+      # the port is open — cheaper + no runtime dep on extra binaries.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'"]
       interval: 15s
       timeout: 10s
       retries: 8
