@@ -1,0 +1,25 @@
+# Vigil — HAPI FHIR R4 image with an embedded health probe.
+#
+# Upstream `hapiproject/hapi:v7.2.0` is distroless (no sh, no curl, no
+# wget), so docker's CMD-SHELL healthchecks can't run. Rather than
+# revert to a shell-heavy base image, we copy a single statically-
+# linked busybox binary (~1 MB) in from the official `busybox:musl`
+# image. `busybox wget` against /fhir/metadata gives us a semantic
+# probe — it only passes once HAPI has finished Hibernate migration
+# and is serving the CapabilityStatement.
+#
+# Why this over alternatives:
+#   - apt install bash curl  → defeats the point of distroless and
+#     pulls in a full libc + utility set.
+#   - Drop the healthcheck   → loses the service_healthy gate that
+#     the mcp/a2a/api services depend on.
+#   - Sidecar probe container → extra moving part for what's really
+#     a one-line fix.
+#
+# busybox is a single static binary — no dynamic loader, no package
+# manager, no shell expansion. One trusted upstream (multi-sig'd on
+# Docker Hub), pinned by tag.
+
+FROM hapiproject/hapi:v7.2.0
+
+COPY --from=busybox:1.36-musl /bin/busybox /bin/busybox

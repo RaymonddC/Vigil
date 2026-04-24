@@ -35,7 +35,13 @@ services:
     restart: unless-stopped
 
   hapi:
-    image: hapiproject/hapi:v7.2.0
+    # Built from Dockerfile.hapi: upstream hapiproject/hapi:v7.2.0 plus
+    # a statically-linked busybox for the healthcheck probe. See the
+    # Dockerfile header for rationale.
+    build:
+      context: .
+      dockerfile: Dockerfile.hapi
+    image: vigil-hapi:latest
     container_name: vigil-hapi
     # SEC-10: bind to loopback only. Internal docker network lets peers
     # reach the container by service name (hapi:8080); the host-port
@@ -64,13 +70,17 @@ services:
       "hapi.fhir.enforce_referential_integrity_on_write": "false"
       "hapi.fhir.enforce_referential_integrity_on_delete": "false"
     healthcheck:
-      # HAPI image doesn't ship curl/wget. Use bash's /dev/tcp to check
-      # the port is open — cheaper + no runtime dep on extra binaries.
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'"]
+      # Semantic probe via busybox wget — passes only when HAPI has
+      # finished Hibernate migration and is serving CapabilityStatement.
+      # Budget: start_period (120s grace) + retries * interval (300s) =
+      # 7 minutes before unhealthy. HAPI cold-start on a 4 GB instance
+      # with a fresh schema migration can take 90-150s, so the grace is
+      # deliberately generous.
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/fhir/metadata"]
       interval: 15s
       timeout: 10s
-      retries: 8
-      start_period: 60s
+      retries: 20
+      start_period: 120s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
