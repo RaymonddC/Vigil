@@ -41,15 +41,22 @@ jobs:
 
       - name: Healthcheck
         run: |
-          # Retry up to 60 s for Caddy + api to settle. Previously this
-          # step `exit 0`'d on ANY response, so every broken deploy went
-          # green in Actions and we only noticed by SSHing in. Now it
-          # fails the workflow if /api/health hasn't returned 200 within
-          # the budget — deploy status actually means something.
+          # Probe against SITE_DOMAIN (not EC2_HOST) — Caddy's Let's Encrypt
+          # cert is issued for the public hostname, so HTTPS requests to the
+          # raw IP fail with a TLS internal-error alert. EC2_HOST keeps being
+          # used for SSH (no cert needed there).
+          #
+          # Retry up to 60 s for Caddy + api to settle. Previously this step
+          # `exit 0`'d on ANY response, so every broken deploy went green in
+          # Actions and we only noticed by SSHing in.
           set -e
-          HOST="${{ secrets.EC2_HOST }}"
-          URL="https://${HOST}/api/health"
-          echo "Probing ${URL} (follows Caddy's HTTP→HTTPS redirect)"
+          DOMAIN="${{ secrets.SITE_DOMAIN }}"
+          if [[ -z "${DOMAIN}" ]]; then
+            echo "::error::SITE_DOMAIN secret is not set. Add it in repo Settings → Secrets and variables → Actions (e.g. '13-238-216-196.sslip.io')."
+            exit 1
+          fi
+          URL="https://${DOMAIN}/api/health"
+          echo "Probing ${URL}"
           for attempt in $(seq 1 12); do
             code=$(curl -sS -L -o /dev/null -w "%{http_code}" -m 10 "${URL}" || echo "000")
             echo "  attempt ${attempt}/12 → ${code}"
