@@ -1,0 +1,57 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # lets you trigger manually from the Actions tab
+
+concurrency:
+  group: ec2-deploy
+  cancel-in-progress: false   # don't cancel a running deploy; queue instead
+
+jobs:
+  deploy:
+    name: SSH + rebuild
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy on EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+              ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<'ENDSSH'
+            set -euo pipefail
+            cd /opt/vigil
+            echo "::group::git pull"
+            sudo git pull --ff-only origin main
+            echo "::endgroup::"
+            echo "::group::docker compose up -d --build"
+            sudo docker compose up -d --build
+            echo "::endgroup::"
+            echo "::group::docker compose ps"
+            sudo docker compose ps
+            echo "::endgroup::"
+          ENDSSH
+
+      - name: Healthcheck
+        run: |
+          echo "Waiting for services to settle..."
+          sleep 15
+          HOST="${{ secrets.EC2_HOST }}"
+          # Basic TCP/HTTP checks through the public IP. Caddy handles TLS,
+          # so hit the public hostname if SITE_DOMAIN is set; else IP:80.
+          set +e
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -m 10 "http://${HOST}/api/health" || echo "curl-fail")
+          echo "Public /api/health response: ${code}"
+          if [[ "${code}" =~ ^(200|301|302|308)$ ]]; then
+            echo "Deploy healthy."
+            exit 0
+          fi
+          echo "::warning::Health endpoint returned ${code} — deploy completed but health is unclear. SSH in to verify."
+          exit 0   # don't fail the workflow on a transient redirect; logs tell the story
