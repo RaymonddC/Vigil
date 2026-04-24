@@ -58,6 +58,8 @@ backend/api/review_queue.db
 *.key
 *.p12
 
-# Data (keep structure, ignore generated)
-data/patients/*.json
-!data/patients/.gitkeep
+# Data
+# Synthetic FHIR fixtures (data/patients/PT-*.json) are tracked — they're
+# test inputs, not generated artifacts. The integration suite + fixture
+# FHIR server load them at import time; without them CI has no observations
+# to exercise the clinical tools against.

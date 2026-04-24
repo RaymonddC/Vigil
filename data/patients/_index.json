@@ -1,0 +1,74 @@
+{
+  "patients": [
+    {
+      "patient_id": "PT-001",
+      "mrn": "MRN-100001",
+      "trajectory": "stable",
+      "demo_role": "hero",
+      "file": "PT-001.json"
+    },
+    {
+      "patient_id": "PT-002",
+      "mrn": "MRN-100002",
+      "trajectory": "stable",
+      "demo_role": "filler",
+      "file": "PT-002.json"
+    },
+    {
+      "patient_id": "PT-003",
+      "mrn": "MRN-100003",
+      "trajectory": "stable",
+      "demo_role": "filler",
+      "file": "PT-003.json"
+    },
+    {
+      "patient_id": "PT-004",
+      "mrn": "MRN-100004",
+      "trajectory": "deteriorating",
+      "demo_role": "filler",
+      "file": "PT-004.json"
+    },
+    {
+      "patient_id": "PT-005",
+      "mrn": "MRN-100005",
+      "trajectory": "deteriorating",
+      "demo_role": "filler",
+      "file": "PT-005.json"
+    },
+    {
+      "patient_id": "PT-006",
+      "mrn": "MRN-100006",
+      "trajectory": "deteriorating",
+      "demo_role": "filler",
+      "file": "PT-006.json"
+    },
+    {
+      "patient_id": "PT-007",
+      "mrn": "MRN-100007",
+      "trajectory": "deteriorating",
+      "demo_role": "hero",
+      "file": "PT-007.json"
+    },
+    {
+      "patient_id": "PT-008",
+      "mrn": "MRN-100008",
+      "trajectory": "sepsis",
+      "demo_role": "filler",
+      "file": "PT-008.json"
+    },
+    {
+      "patient_id": "PT-009",
+      "mrn": "MRN-100009",
+      "trajectory": "sepsis",
+      "demo_role": "hero",
+      "file": "PT-009.json"
+    },
+    {
+      "patient_id": "PT-010",
+      "mrn": "MRN-100010",
+      "trajectory": "pph",
+      "demo_role": "hero",
+      "file": "PT-010.json"
+    }
+  ]
+}
