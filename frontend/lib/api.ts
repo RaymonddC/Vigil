@@ -220,11 +220,14 @@ export async function ackAlert(
   pid: string,
   aid: string
 ): Promise<ApproveResponse> {
+  // Dynamic import keeps the client-only localStorage code out of any server
+  // bundle that happens to pull in this module transitively.
+  const { getSelectedClinicianId } = await import("./clinicians");
   const res = await fetch(`/api/patients/${pid}/alerts/${aid}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      clinician_id: "prac-nurse-17",
+      clinician_id: getSelectedClinicianId(),
       note: "Acknowledged, RRT dispatched.",
     }),
   });

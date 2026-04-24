@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
+import { ClinicianSwitcher } from "@/components/clinician-switcher";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -82,7 +83,7 @@ export default function RootLayout({
 
           {/* User & settings — right */}
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-600 dark:text-slate-300">Dr. A. Chen</span>
+            <ClinicianSwitcher />
             <Link
               href="/settings"
               className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
