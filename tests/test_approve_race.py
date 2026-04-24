@@ -90,10 +90,22 @@ async def test_concurrent_approves_one_wins_one_409():
         hapi_calls.append(resource_type)
         return {"resourceType": resource_type, "id": f"fake-{resource_type.lower()}-1"}
 
+    async def _fake_put(
+        self, resource_type: str, resource_id: str, resource: dict
+    ) -> dict:
+        # _ensure_vigil_referenced_resources PUTs the Vigil Device and
+        # PractitionerRole idempotently before the Communication POST (HAPI-1094
+        # referential integrity). Not part of this test's race assertions — we
+        # only care about POST call counts — so short-circuit to a no-op.
+        return {"resourceType": resource_type, "id": resource_id}
+
     payload = {"clinician_id": "prac-nurse-17", "note": "looks good"}
     url = f"/api/patients/PT-001/alerts/{alert_id}/approve"
 
-    with patch("backend.fhir.client.FhirClient.post_resource", new=_fake_post):
+    with (
+        patch("backend.fhir.client.FhirClient.post_resource", new=_fake_post),
+        patch("backend.fhir.client.FhirClient.put_resource", new=_fake_put),
+    ):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
