@@ -81,7 +81,10 @@ app.add_middleware(
 # Request ID propagation
 # ---------------------------------------------------------------------------
 
-_AUTH_SKIP_PREFIXES = ("/docs", "/openapi.json", "/redoc")
+# Paths that bypass the X-API-Key check. /api/health must be reachable by
+# Caddy + the GitHub Actions deploy probe without a key — it returns only
+# {status, ts}, no PHI. The OpenAPI routes are doc-only and safe to expose.
+_AUTH_SKIP_PREFIXES = ("/api/health", "/docs", "/openapi.json", "/redoc")
 
 
 @app.middleware("http")

@@ -134,7 +134,9 @@ services:
       VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
       MCP_BASE_URL: http://mcp:7001
       FHIR_BASE_URL: http://hapi:8080/fhir
-      A2A_PUBLIC_URL: ${A2A_PUBLIC_URL:-https://${SITE_DOMAIN:-localhost}}
+      # /a2a suffix lines up with the Caddyfile's `handle /a2a*` route —
+      # external A2A callers hit this URL directly from the AgentCard.
+      A2A_PUBLIC_URL: ${A2A_PUBLIC_URL:-https://${SITE_DOMAIN:-localhost}/a2a}
       POLL_INTERVAL_SEC: "900"
       LOG_LEVEL: INFO
     depends_on:
@@ -161,12 +163,30 @@ services:
       FHIR_BASE_URL: http://hapi:8080/fhir
       A2A_AGENT_URL: http://a2a:9000
       CORS_ORIGINS: ${CORS_ORIGINS:-https://${SITE_DOMAIN:-localhost}}
+      # Persist the SBAR review queue on a named volume so it survives
+      # rebuilds and doesn't need a writable /app/backend/api/ directory.
+      VIGIL_REVIEW_QUEUE_PATH: /var/lib/vigil/review_queue.db
       LOG_LEVEL: INFO
+    volumes:
+      - vigil-review-queue:/var/lib/vigil
     depends_on:
       hapi:
         condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      # In-process urllib probe — python is already on PATH, no extra
+      # deps needed. /api/health skips the X-API-Key middleware so this
+      # doesn't need credentials. Matches the deploy probe in CI.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -188,8 +208,13 @@ services:
       # Server-side calls (RSC, /api/[...path] proxy) go direct to the api
       # container over the internal docker network.
       BACKEND_URL: http://api:8000
+      # Same shared secret the backend enforces via the X-API-Key
+      # middleware. frontend/lib/api.ts injects this header on every
+      # RSC fetch; without it every server-rendered page 401s.
+      VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     expose:
       - "3000"
     restart: unless-stopped
@@ -224,4 +249,6 @@ volumes:
   caddy-data:
     driver: local
   caddy-config:
+    driver: local
+  vigil-review-queue:
     driver: local

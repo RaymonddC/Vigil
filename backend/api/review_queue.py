@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sqlite3
 import uuid
 from collections.abc import Generator
@@ -25,8 +26,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# Store the DB next to this file so it's always in the backend/api/ directory.
-DB_PATH = Path(__file__).parent / "review_queue.db"
+# Default: colocated with this file for dev convenience. Containers override
+# via VIGIL_REVIEW_QUEUE_PATH → a volume mount at /var/lib/vigil so the DB
+# survives rebuilds AND isn't written inside a root-owned source tree
+# (USER vigil in the image can't write under /app/backend/api/).
+DB_PATH = Path(
+    os.environ.get(
+        "VIGIL_REVIEW_QUEUE_PATH",
+        str(Path(__file__).parent / "review_queue.db"),
+    )
+)
 
 
 @contextmanager
@@ -47,6 +56,7 @@ def _conn() -> Generator[sqlite3.Connection, None, None]:
 
 def init_db() -> None:
     """Create tables and indexes if they don't exist. Call once at startup."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _conn() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
