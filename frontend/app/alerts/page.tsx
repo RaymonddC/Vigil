@@ -299,6 +299,11 @@ export default function AlertsPage() {
     }
   }, []);
 
+  // Legitimate fetch-on-mount: load() populates state from the review-queue
+  // endpoint. react-hooks/set-state-in-effect flags this transitively (even
+  // through useEffectEvent), but the writes happen after await and are the
+  // intended "synchronise React state with external source" shape.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
   const handleApprove = async (alert: QueueAlert) => {

@@ -212,7 +212,14 @@ export default function TimelinePage() {
     }
   }, []);
 
+  // Polling effect: initial poll() kickoff, then 2 s events + 10 s clock.
+  // react-hooks/set-state-in-effect flags the bare poll() call transitively
+  // (and even through useEffectEvent); the set-state happens after an await,
+  // which is the rule's accepted pattern even though its static analysis
+  // can't see that. setInterval(poll, …) passes poll as a callback so the
+  // rule doesn't flag those.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     poll();
     intervalRef.current = setInterval(poll, 2000);
     clockRef.current = setInterval(() => setNowMs(Date.now()), 10_000);
