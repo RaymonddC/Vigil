@@ -107,8 +107,10 @@ ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 # CORS restricted to the site domain; loopback kept for ssh-tunnel debugging.
 CORS_ORIGINS=https://$SITE_DOMAIN,http://localhost:3000
 
-# A2A_PUBLIC_URL lands inside the AgentCard for external callers.
-A2A_PUBLIC_URL=https://$SITE_DOMAIN
+# A2A_PUBLIC_URL lands inside the AgentCard for external callers. The
+# Caddyfile routes /a2a* → a2a:9000; without the /a2a suffix external
+# callers would land on the frontend catch-all instead of the agent.
+A2A_PUBLIC_URL=https://$SITE_DOMAIN/a2a
 EOF
 chown ubuntu:ubuntu "$VIGIL_DIR/.env"
 chmod 600 "$VIGIL_DIR/.env"

@@ -41,17 +41,23 @@ jobs:
 
       - name: Healthcheck
         run: |
-          echo "Waiting for services to settle..."
-          sleep 15
+          # Retry up to 60 s for Caddy + api to settle. Previously this
+          # step `exit 0`'d on ANY response, so every broken deploy went
+          # green in Actions and we only noticed by SSHing in. Now it
+          # fails the workflow if /api/health hasn't returned 200 within
+          # the budget — deploy status actually means something.
+          set -e
           HOST="${{ secrets.EC2_HOST }}"
-          # Basic TCP/HTTP checks through the public IP. Caddy handles TLS,
-          # so hit the public hostname if SITE_DOMAIN is set; else IP:80.
-          set +e
-          code=$(curl -sS -o /dev/null -w "%{http_code}" -m 10 "http://${HOST}/api/health" || echo "curl-fail")
-          echo "Public /api/health response: ${code}"
-          if [[ "${code}" =~ ^(200|301|302|308)$ ]]; then
-            echo "Deploy healthy."
-            exit 0
-          fi
-          echo "::warning::Health endpoint returned ${code} — deploy completed but health is unclear. SSH in to verify."
-          exit 0   # don't fail the workflow on a transient redirect; logs tell the story
+          URL="https://${HOST}/api/health"
+          echo "Probing ${URL} (follows Caddy's HTTP→HTTPS redirect)"
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -L -o /dev/null -w "%{http_code}" -m 10 "${URL}" || echo "000")
+            echo "  attempt ${attempt}/12 → ${code}"
+            if [[ "${code}" == "200" ]]; then
+              echo "::notice::Deploy healthy after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::/api/health never returned 200 within 60 s. Last code: ${code}."
+          exit 1
