@@ -11,6 +11,7 @@ Reference: BUILD_PLAN F5, PROJECT_BRIEF:56
 
 from __future__ import annotations
 
+import json
 import os
 from abc import ABC, abstractmethod
 
@@ -176,14 +177,21 @@ class ClaudeProvider(Provider):
 class StubProvider(Provider):
     """Fixed-template provider for CI and testing.
 
-    Returns deterministic SBAR-shaped text without any network calls.
+    Returns a deterministic JSON-encoded SBAR object so the downstream
+    parser in generate_escalation_note._parse_sbar lands in the JSON
+    success path instead of the destructive whole-text-into-situation
+    fallback. Field values are intentionally terse and prefix-free —
+    the field name is the prefix, the SBAR card supplies the section
+    label.
     """
 
-    TEMPLATE = (
-        "S: Patient shows signs requiring clinical attention.\n"
-        "B: Postoperative monitoring detected parameter changes.\n"
-        "A: Deterministic screening criteria triggered.\n"
-        "R: Review patient status and consider clinical evaluation."
+    TEMPLATE = json.dumps(
+        {
+            "situation": "Patient shows signs requiring clinical attention.",
+            "background": "Postoperative monitoring detected parameter changes.",
+            "assessment": "Deterministic screening criteria triggered.",
+            "recommendation": "Review patient status and consider clinical evaluation.",
+        }
     )
 
     @property

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -51,12 +52,30 @@ def _make_mock_client(response_data: dict, status: int = 200) -> MagicMock:
 
 class TestStubProvider:
     async def test_returns_template(self):
+        """Stub returns a JSON-encoded SBAR object (not labeled prose).
+
+        The downstream parser in generate_escalation_note._parse_sbar
+        expects JSON on the happy path; returning labeled prose dumped
+        the entire string into the `situation` field. Keep this aligned
+        with the JSON contract.
+        """
         provider = StubProvider()
         result = await provider.complete("any prompt")
-        assert "S:" in result
-        assert "B:" in result
-        assert "A:" in result
-        assert "R:" in result
+        data = json.loads(result)
+        assert set(data.keys()) == {
+            "situation",
+            "background",
+            "assessment",
+            "recommendation",
+        }
+        assert all(isinstance(v, str) and v for v in data.values())
+        # Field values must NOT carry the section-letter prefix —
+        # the field name already serves as the section label.
+        for letter in ("S:", "B:", "A:", "R:"):
+            for value in data.values():
+                assert not value.startswith(letter), (
+                    f"Stub field value should not start with '{letter}': {value!r}"
+                )
 
     async def test_name(self):
         assert StubProvider().name == "stub/template"

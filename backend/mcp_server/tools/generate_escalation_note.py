@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -154,9 +155,86 @@ Be specific, clinical, and actionable. Reference the actual values above.
 Address the note to the {recipient_role}."""
 
 
+# Match labeled-text SBAR sections in LLM output, e.g.
+#   "S: foo\nB: bar\nA: baz\nR: qux"
+# Tolerates case variation, leading whitespace, and ":" or "-" separators.
+# DOTALL on the body lets a section span multiple lines until the next
+# S:/B:/A:/R: header (or end-of-string).
+_LABELED_RE = re.compile(
+    r"^\s*([SBAR])\s*[:\-]\s*(.+?)(?=\n\s*[SBAR]\s*[:\-]|\Z)",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+
+# Strip a single leading "S:", "B:", "A:" or "R:" from a field value —
+# some providers (Claude, Groq) prepend the section letter to each field's
+# value even when returning JSON, which would otherwise show up as
+# "S: S: Patient is tachycardic" in the SBAR card.
+_LEADING_LABEL_RE = re.compile(r"^\s*[SBAR]\s*[:\-]\s*", re.IGNORECASE)
+
+
+def _strip_label(value: str) -> str:
+    """Remove a leading section-letter prefix (S:/B:/A:/R:) from a field."""
+    if not value:
+        return value
+    return _LEADING_LABEL_RE.sub("", value, count=1).strip()
+
+
+def _parse_labeled_sbar(text: str) -> dict[str, str] | None:
+    """Parse `S: foo\\nB: bar\\nA: baz\\nR: qux` into the four SBAR fields.
+
+    Returns None if no S/B/A/R-style headers are found, signalling the
+    caller to try the next fallback. Missing fields default to empty
+    strings (not "—"), so the SBAR card can render placeholders itself.
+    """
+    out: dict[str, str] = {
+        "situation": "",
+        "background": "",
+        "assessment": "",
+        "recommendation": "",
+    }
+    key_for: dict[str, str] = {
+        "S": "situation",
+        "B": "background",
+        "A": "assessment",
+        "R": "recommendation",
+    }
+    found = False
+    for m in _LABELED_RE.finditer(text):
+        letter = m.group(1).upper()
+        body = m.group(2).strip()
+        out[key_for[letter]] = body
+        found = True
+    return out if found else None
+
+
+def _sbar_from_dict(data: dict[str, Any]) -> SBAR:
+    """Build an SBAR, stripping any stale leading S:/B:/A:/R: per field."""
+    return SBAR(
+        situation=_strip_label(str(data.get("situation", ""))),
+        background=_strip_label(str(data.get("background", ""))),
+        assessment=_strip_label(str(data.get("assessment", ""))),
+        recommendation=_strip_label(str(data.get("recommendation", ""))),
+    )
+
+
 def _parse_sbar(llm_output: str) -> SBAR:
-    """Parse SBAR JSON from LLM output, with fallback."""
-    # Try to extract JSON from the output
+    """Parse an SBAR from LLM output.
+
+    Three-layer strategy, in order:
+
+    1. JSON parse (preferred — the prompt asks for JSON). If it parses
+       and yields at least one SBAR field, use it.
+    2. Labeled-text parse (S:/B:/A:/R: prefixes). Salvages providers
+       that ignored the JSON instruction but still produced a sensible
+       narrative.
+    3. Last-ditch destructive fallback: dump the whole output into
+       `situation` with boilerplate for the rest. Only reached when the
+       output is unparseable in either format.
+
+    Any leading "S:"/"B:"/"A:"/"R:" prefix is stripped from each field
+    after parsing — some providers prepend the section letter to the
+    body even when returning JSON.
+    """
     text = llm_output.strip()
 
     # Find JSON block (may be wrapped in markdown code fences)
@@ -170,22 +248,28 @@ def _parse_sbar(llm_output: str) -> SBAR:
                 text = cleaned
                 break
 
+    sbar_keys = ("situation", "background", "assessment", "recommendation")
+
+    # 1. JSON parse
     try:
         data = json.loads(text)
-        return SBAR(
-            situation=data.get("situation", ""),
-            background=data.get("background", ""),
-            assessment=data.get("assessment", ""),
-            recommendation=data.get("recommendation", ""),
-        )
-    except (json.JSONDecodeError, KeyError):
-        # Fallback: use the raw text as situation
-        return SBAR(
-            situation=llm_output[:500],
-            background="See automated screening results.",
-            assessment="Clinical review required.",
-            recommendation="Evaluate patient and confirm findings.",
-        )
+        if isinstance(data, dict) and any(k in data for k in sbar_keys):
+            return _sbar_from_dict(data)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Labeled-text parse (S:/B:/A:/R:)
+    labeled = _parse_labeled_sbar(llm_output)
+    if labeled is not None:
+        return _sbar_from_dict(labeled)
+
+    # 3. Last-ditch destructive fallback
+    return SBAR(
+        situation=llm_output[:500],
+        background="See automated screening results.",
+        assessment="Clinical review required.",
+        recommendation="Evaluate patient and confirm findings.",
+    )
 
 
 def _build_communication_draft(
