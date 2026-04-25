@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Clinician switcher</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); }
+.sw { width: 260px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-1); overflow: hidden; }
+.cur { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--surface-2); }
+.av { width: 28px; height: 28px; border-radius: 50%; background: var(--ink-700); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+.nm { font-size: 13px; font-weight: 500; color: var(--fg-1); }
+.role { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+.list { display: flex; flex-direction: column; }
+.item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; }
+.item:hover { background: var(--surface-2); }
+.item .av2 { width: 22px; height: 22px; border-radius: 50%; background: var(--gray-200); color: var(--fg-2); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; }
+.item .txt { font-size: 12px; color: var(--fg-1); }
+.item .r { margin-left: auto; font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Clinician switcher · identity menu in top nav</div>
+  <div class="sw">
+    <div class="cur"><span class="av">AP</span><div><div class="nm">Dr. Amit Patel</div><div class="role">INTENSIVIST · ON SHIFT</div></div></div>
+    <div class="list">
+      <div class="item"><span class="av2">SC</span><span class="txt">Sarah Chen</span><span class="r">RN</span></div>
+      <div class="item"><span class="av2">ML</span><span class="txt">Maya Lee</span><span class="r">CHARGE</span></div>
+      <div class="item"><span class="av2">LP</span><span class="txt">Dr. Lindsay Park</span><span class="r">RAPID</span></div>
+    </div>
+  </div>
+</div></body></html>

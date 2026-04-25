@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Semantic colors</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.sem-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.sem {
+  padding: 14px;
+  border-radius: 6px;
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--border-subtle);
+}
+.sem .top { display: flex; align-items: center; gap: 8px; }
+.sem .dot { width: 14px; height: 14px; border-radius: 4px; }
+.sem .n { font-size: 13px; font-weight: 600; color: var(--fg-1); }
+.sem .h { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.sem.s-success { background: var(--success-bg); }
+.sem.s-success .dot { background: var(--success); }
+.sem.s-warn { background: var(--warning-bg); }
+.sem.s-warn .dot { background: var(--warning); }
+.sem.s-danger { background: var(--danger-bg); }
+.sem.s-danger .dot { background: var(--danger); }
+.sem.s-info { background: var(--info-bg); }
+.sem.s-info .dot { background: var(--info); }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Semantic · success / warning / danger / info</div>
+  <div class="sem-grid">
+    <div class="sem s-success"><div class="top"><div class="dot"></div><div class="n">Success</div></div><div class="h">#2F7D5C · approved, written</div></div>
+    <div class="sem s-warn"><div class="top"><div class="dot"></div><div class="n">Warning</div></div><div class="h">#B45309 · watch, pending</div></div>
+    <div class="sem s-danger"><div class="top"><div class="dot"></div><div class="n">Danger</div></div><div class="h">#B91C1C · critical, dismiss</div></div>
+    <div class="sem s-info"><div class="top"><div class="dot"></div><div class="n">Info</div></div><div class="h">#2B3A67 · neutral hint</div></div>
+  </div>
+</div></body></html>

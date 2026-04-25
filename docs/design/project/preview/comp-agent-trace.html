@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Agent state trace</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); font-size: 12px; }
+.trace { display: flex; flex-direction: column; border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; background: var(--surface-1); }
+.evt { display: grid; grid-template-columns: 68px 22px 1fr 80px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+.evt:last-child { border-bottom: none; }
+.evt .t { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.evt .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-300); }
+.evt.active .dot { background: var(--ink-700); box-shadow: 0 0 0 3px var(--ink-100); }
+.evt.done .dot { background: var(--success); }
+.evt .lbl { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; font-weight: 600; color: var(--fg-1); }
+.evt .detail { font-size: 11px; color: var(--fg-3); margin-left: 8px; font-family: var(--font-sans); font-weight: 400; letter-spacing: 0; }
+.evt .ms { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); text-align: right; }
+</style>
+</head><body><div class="preview" style="padding:12px 16px">
+  <div class="pv-label">Agent trace · 7-state machine · progression not log dump</div>
+  <div class="trace">
+    <div class="evt done"><span class="t">14:01:58</span><span class="dot"></span><span><span class="lbl">POLLING</span><span class="detail">fetched FHIR vitals for 8 beds</span></span><span class="ms">220 ms</span></div>
+    <div class="evt done"><span class="t">14:02:01</span><span class="dot"></span><span><span class="lbl">SCREENING</span><span class="detail">flagged Bed 12 for review</span></span><span class="ms">180 ms</span></div>
+    <div class="evt done"><span class="t">14:02:03</span><span class="dot"></span><span><span class="lbl">RISK_SCORING</span><span class="detail">NEWS2 = 8 · qSOFA = 2</span></span><span class="ms">412 ms</span></div>
+    <div class="evt active"><span class="t">14:02:04</span><span class="dot"></span><span><span class="lbl">SEPSIS_CHECK</span><span class="detail">evaluating lactate trend · tool call</span></span><span class="ms">—</span></div>
+  </div>
+</div></body></html>

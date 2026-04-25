@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Iconography</title>
+<link rel="stylesheet" href="_preview.css">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+.icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; }
+.ic { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--border-subtle); border-radius: 6px; }
+.ic [data-lucide] { width: 20px; height: 20px; color: var(--fg-1); stroke-width: 1.75; }
+.ic .nm { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Icons · Lucide · 1.75 stroke · 16/20px</div>
+  <div class="icons">
+    <div class="ic"><i data-lucide="activity"></i><span class="nm">activity</span></div>
+    <div class="ic"><i data-lucide="heart-pulse"></i><span class="nm">heart-pulse</span></div>
+    <div class="ic"><i data-lucide="stethoscope"></i><span class="nm">stetho</span></div>
+    <div class="ic"><i data-lucide="shield-check"></i><span class="nm">shield</span></div>
+    <div class="ic"><i data-lucide="user-round"></i><span class="nm">user</span></div>
+    <div class="ic"><i data-lucide="bell"></i><span class="nm">bell</span></div>
+    <div class="ic"><i data-lucide="clock"></i><span class="nm">clock</span></div>
+    <div class="ic"><i data-lucide="check-check"></i><span class="nm">check</span></div>
+  </div>
+  <script>lucide.createIcons();</script>
+</div></body></html>

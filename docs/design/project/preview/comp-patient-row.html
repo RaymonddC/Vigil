@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Patient row</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); }
+.rows { border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-1); overflow: hidden; }
+.row { display: grid; grid-template-columns: 8px 52px 1fr 110px 120px; align-items: center; padding: 0; border-bottom: 1px solid var(--border-subtle); height: 46px; }
+.row:last-child { border-bottom: none; }
+.row .stripe { width: 4px; height: 30px; margin-left: 4px; border-radius: 2px; }
+.s-crit { background: var(--risk-critical); }
+.s-hi { background: var(--risk-high); }
+.s-norm { background: var(--risk-normal); }
+.bed { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); padding-left: 8px; }
+.pt { display: flex; flex-direction: column; padding-left: 4px; }
+.pt .nm { font-size: 13px; font-weight: 500; color: var(--fg-1); }
+.pt .sub { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+.vits { font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); padding-left: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; margin-right: 12px; }
+.chip .g { font-size: 9px; line-height: 1; }
+.c-crit { color: var(--risk-critical); background: var(--risk-critical-bg); }
+.c-crit .g { animation: pulse 1.2s ease-in-out infinite; }
+.c-hi { color: var(--risk-high); background: var(--risk-high-bg); }
+.c-norm { color: var(--risk-normal); background: var(--risk-normal-bg); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Patient row · risk stripe + chip + tabular vitals</div>
+  <div class="rows">
+    <div class="row"><div class="stripe s-crit"></div><div class="bed">B-12</div><div class="pt"><span class="nm">Martinez, A.</span><span class="sub">MRN 00428 · post-op d1</span></div><div class="vits">128 · 62 · 94</div><div><span class="chip c-crit"><span class="g">●</span>Critical</span></div></div>
+    <div class="row"><div class="stripe s-hi"></div><div class="bed">B-07</div><div class="pt"><span class="nm">Okafor, C.</span><span class="sub">MRN 00391 · postpartum</span></div><div class="vits">108 · 71 · 96</div><div><span class="chip c-hi"><span class="g">◕</span>High</span></div></div>
+    <div class="row"><div class="stripe s-norm"></div><div class="bed">B-03</div><div class="pt"><span class="nm">Singh, R.</span><span class="sub">MRN 00256 · post-op d2</span></div><div class="vits">082 · 86 · 98</div><div><span class="chip c-norm"><span class="g">○</span>Normal</span></div></div>
+  </div>
+</div></body></html>

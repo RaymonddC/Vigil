@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Motion</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.mtab { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mtab th { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-default); }
+.mtab td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); color: var(--fg-2); }
+.mtab td.tok { font-family: var(--font-mono); color: var(--fg-1); font-weight: 500; }
+.mtab td.v   { font-family: var(--font-mono); color: var(--fg-3); }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Motion · ease-out only · no bounce · no spring</div>
+  <table class="mtab">
+    <tr><th>Token</th><th>Duration</th><th>Use</th></tr>
+    <tr><td class="tok">motion-instant</td><td class="v">80ms linear</td><td>hover color</td></tr>
+    <tr><td class="tok">motion-fast</td><td class="v">120ms ease-out</td><td>press, chip flip</td></tr>
+    <tr><td class="tok">motion-base</td><td class="v">180ms ease-out</td><td>panel, toast</td></tr>
+    <tr><td class="tok">motion-slow</td><td class="v">320ms ease-out</td><td>route, modal</td></tr>
+    <tr><td class="tok">motion-pulse</td><td class="v">1200ms ease-in-out ∞</td><td>critical risk</td></tr>
+  </table>
+</div></body></html>

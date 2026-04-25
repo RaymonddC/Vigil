@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Inputs</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.grid { display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field .lbl { font-size: 11px; color: var(--fg-3); letter-spacing: 0.04em; text-transform: uppercase; font-weight: 500; }
+.input { height: 32px; padding: 0 10px; background: var(--surface-1); border: 1px solid var(--border-default); border-radius: 4px; font-family: var(--font-sans); font-size: 13px; color: var(--fg-1); outline: none; }
+.input:focus { border-color: var(--ink-700); outline: 2px solid var(--ink-700); outline-offset: 1px; }
+.input.focused { border-color: var(--ink-700); outline: 2px solid var(--ink-700); outline-offset: 1px; }
+.help { font-size: 11px; color: var(--fg-3); }
+.err { font-size: 11px; color: var(--danger); }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Inputs · default · focus · error</div>
+  <div class="grid">
+    <div class="field"><span class="lbl">Search MRN</span><input class="input" placeholder="MRN-0042"></div>
+    <div class="field"><span class="lbl">Search MRN · focus</span><input class="input focused" value="MRN-0042"></div>
+    <div class="field"><span class="lbl">Search MRN · error</span><input class="input" value="MRN-XXXX" style="border-color:var(--danger);outline:2px solid var(--danger);outline-offset:1px"><span class="err">Not found in roster</span></div>
+  </div>
+</div></body></html>

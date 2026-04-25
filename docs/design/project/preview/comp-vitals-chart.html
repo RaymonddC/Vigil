@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Vitals chart</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); }
+.card { border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-1); padding: 12px 14px; }
+.hd { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.hd .ttl { font-size: 12px; font-weight: 600; color: var(--fg-1); }
+.hd .leg { display: flex; gap: 12px; margin-left: auto; font-family: var(--font-mono); font-size: 10px; }
+.hd .leg span { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); }
+.hd .leg i { width: 10px; height: 2px; display: inline-block; }
+svg.chart { width: 100%; height: 90px; display: block; }
+.xax { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); margin-top: 2px; }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Vitals chart · 24h multi-series · tabular nums · quiet grid</div>
+  <div class="card">
+    <div class="hd">
+      <span class="ttl">Bed 12 · Martinez, A.</span>
+      <span class="leg"><span><i style="background:var(--risk-critical)"></i>HR</span><span><i style="background:var(--ink-700)"></i>MAP</span><span><i style="background:var(--success)"></i>SpO₂</span></span>
+    </div>
+    <svg class="chart" viewBox="0 0 620 90" preserveAspectRatio="none">
+      <!-- grid -->
+      <g stroke="#E9ECF0" stroke-width="1">
+        <line x1="0" y1="20" x2="620" y2="20"/>
+        <line x1="0" y1="45" x2="620" y2="45"/>
+        <line x1="0" y1="70" x2="620" y2="70"/>
+      </g>
+      <!-- HR (red) climbing -->
+      <path d="M0,55 L60,52 L120,50 L180,48 L240,45 L300,40 L360,32 L420,26 L480,22 L540,20 L620,18" stroke="#B91C1C" stroke-width="1.5" fill="none"/>
+      <!-- MAP (ink) dropping -->
+      <path d="M0,35 L60,37 L120,38 L180,40 L240,44 L300,50 L360,55 L420,60 L480,64 L540,66 L620,68" stroke="#2B3A67" stroke-width="1.5" fill="none"/>
+      <!-- SpO2 (green) mostly flat -->
+      <path d="M0,22 L60,22 L120,23 L180,22 L240,24 L300,25 L360,26 L420,27 L480,29 L540,30 L620,32" stroke="#2F7D5C" stroke-width="1.5" fill="none"/>
+      <!-- flag marker -->
+      <line x1="470" y1="0" x2="470" y2="90" stroke="#B91C1C" stroke-width="1" stroke-dasharray="2 3"/>
+    </svg>
+    <div class="xax"><span>−24h</span><span>−18</span><span>−12</span><span>−6</span><span>now</span></div>
+  </div>
+</div></body></html>

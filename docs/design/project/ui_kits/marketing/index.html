@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vigil — A second pair of eyes on every post-op bed</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="marketing.css">
+</head>
+<body>
+<nav class="m-nav">
+  <div class="m-nav__brand">
+    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M6 5 L26 5 L26 16 C26 22.6 21.5 27 16 29 C10.5 27 6 22.6 6 16 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M10.5 16 C12.2 13.3 14 12 16 12 C18 12 19.8 13.3 21.5 16 C19.8 18.7 18 20 16 20 C14 20 12.2 18.7 10.5 16 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="16" cy="16" r="1.75" fill="currentColor"/>
+    </svg>
+    <span class="wm">Vigil</span>
+  </div>
+  <div class="m-nav__links">
+    <a href="#how">How it works</a>
+    <a href="#principles">Principles</a>
+    <a href="#security">Security</a>
+    <a href="../app/index.html">Demo</a>
+    <a class="m-nav__cta" href="../app/index.html">Open dashboard →</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div>
+    <span class="pill"><span class="d"></span>Designed for post-op and postpartum wards</span>
+    <h1>A second pair of eyes on <em>every post-op bed.</em></h1>
+    <p>Vigil reads vitals every two seconds, drafts a formal SBAR handoff when a pattern emerges, and waits for a clinician to approve before anything touches the record.</p>
+    <div class="ctas">
+      <a class="cta cta--primary" href="../app/index.html">Open the dashboard →</a>
+      <a class="cta cta--ghost" href="#how">See how it works</a>
+    </div>
+    <p style="margin-top:20px;font-size:12px;color:var(--fg-3)">Press <span class="kbd">⌘K</span> anywhere to jump to a patient.</p>
+  </div>
+
+  <!-- Hero preview -->
+  <div class="hero__screen">
+    <div class="chrome">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="url">vigil.health/patients</span>
+    </div>
+    <div class="rows">
+      <div class="r" style="background:var(--risk-critical-bg)">
+        <div class="stripe" style="background:var(--risk-critical)"></div>
+        <div class="bed">B-12</div>
+        <div class="nm">Martinez, A. <span style="font-family:var(--font-mono);color:var(--fg-3);font-weight:400;font-size:11px">· POD 1</span></div>
+        <div><span class="chip" style="background:var(--risk-critical-bg);color:var(--risk-critical);border:1px solid color-mix(in oklab, var(--risk-critical) 30%, transparent)">● CRITICAL</span></div>
+      </div>
+      <div class="r">
+        <div class="stripe" style="background:var(--risk-high)"></div>
+        <div class="bed">B-07</div>
+        <div class="nm">Okafor, C. <span style="font-family:var(--font-mono);color:var(--fg-3);font-weight:400;font-size:11px">· PPD 1</span></div>
+        <div><span class="chip" style="background:var(--risk-high-bg);color:var(--risk-high)">◕ HIGH</span></div>
+      </div>
+      <div class="r">
+        <div class="stripe" style="background:var(--risk-medium)"></div>
+        <div class="bed">B-14</div>
+        <div class="nm">Abramov, N. <span style="font-family:var(--font-mono);color:var(--fg-3);font-weight:400;font-size:11px">· POD 2</span></div>
+        <div><span class="chip" style="background:var(--risk-medium-bg);color:var(--risk-medium)">◐ MEDIUM</span></div>
+      </div>
+      <div class="r">
+        <div class="stripe" style="background:var(--risk-normal)"></div>
+        <div class="bed">B-03</div>
+        <div class="nm">Singh, R. <span style="font-family:var(--font-mono);color:var(--fg-3);font-weight:400;font-size:11px">· POD 2</span></div>
+        <div><span class="chip" style="background:var(--risk-normal-bg);color:var(--risk-normal)">○ NORMAL</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="principles" id="principles">
+  <div class="principles__inner">
+    <div class="prin">
+      <div class="n">01 · Never acts alone</div>
+      <h3>Human in the loop by design.</h3>
+      <p>Every alert is drafted by Vigil and approved by a named clinician before it's written to the EHR. The audit trail attributes every action to a person.</p>
+    </div>
+    <div class="prin">
+      <div class="n">02 · Information-dense</div>
+      <h3>Eye lands on the one patient that matters.</h3>
+      <p>A roster sorted by risk, a five-level scale readable in under a second, and tabular vitals everywhere. Designed for a 12-hour shift, not a product demo.</p>
+    </div>
+    <div class="prin">
+      <div class="n">03 · Post-op and postpartum</div>
+      <h3>One pipeline, two wards.</h3>
+      <p>The same deterministic 7-state agent monitors surgical recovery and postpartum care. No different flows, no different branding — clinicians move between wards without relearning the tool.</p>
+    </div>
+  </div>
+</section>
+
+<section class="anatomy" id="how">
+  <div>
+    <h2>The SBAR card is the artifact.</h2>
+    <p>Vigil's agent watches FHIR vitals, runs NEWS2 and qSOFA, evaluates trends, and when a pattern emerges it drafts a Situation / Background / Assessment / Recommendation note — the format every clinician already trusts.</p>
+    <ul>
+      <li>Every claim is cited to specific vitals and lab values</li>
+      <li>Clinician edits inline before approving</li>
+      <li>Approved notes land in the EHR attributed to the approver</li>
+      <li>Dismissed drafts are retained for audit, not silently discarded</li>
+    </ul>
+  </div>
+  <div>
+    <!-- Static SBAR -->
+    <div style="border:1px solid var(--border-default); border-radius:6px; overflow:hidden; box-shadow:0 12px 32px rgba(11,15,20,.08);">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--ink-50);border-bottom:1px solid var(--border-subtle)">
+        <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--ink-700);letter-spacing:0.08em;padding:2px 6px;border:1px solid var(--ink-100);border-radius:3px;background:var(--surface-1)">SBAR · DRAFT</span>
+        <span style="font-size:13px;font-weight:600">Martinez, A.</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3)">· Bed 12 · POD 1</span>
+      </div>
+      <div style="display:grid;grid-template-columns:86px 1fr;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border-subtle)">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:var(--fg-3);text-transform:uppercase;padding-top:3px">Situation</span>
+        <span style="font-size:13px;color:var(--fg-1);line-height:1.5">Tachycardia and hypotension since 11:40, now with rising lactate <span style="color:var(--risk-critical);font-weight:500;background:var(--risk-critical-bg);padding:0 3px;border-radius:2px">1.4 → 3.2</span>.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:86px 1fr;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border-subtle)">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:var(--fg-3);text-transform:uppercase;padding-top:3px">Assessment</span>
+        <span style="font-size:13px;color:var(--fg-1);line-height:1.5">Concern for early septic physiology. <span style="color:var(--risk-critical);font-weight:500;background:var(--risk-critical-bg);padding:0 3px;border-radius:2px">qSOFA 2 · NEWS2 8</span>.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:86px 1fr;gap:12px;padding:10px 16px">
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.08em;color:var(--fg-3);text-transform:uppercase;padding-top:3px">Recommend</span>
+        <span style="font-size:13px;color:var(--fg-1);line-height:1.5">Bedside eval within 15 min. Repeat lactate, cultures, crystalloid.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--success-bg);border-top:1px solid var(--border-subtle)">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--success);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">AP</span>
+        <span style="font-size:12px;color:var(--success);font-weight:500">Approved by Dr. Amit Patel · written to EHR</span>
+        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--success);opacity:.7">14:07</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="m-section m-section--tight" id="security">
+  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:24px;border:1px solid var(--border-subtle);border-radius:6px;background:var(--surface-0)">
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);letter-spacing:0.06em;text-transform:uppercase">Security &amp; compliance</div>
+    <span style="font-size:13px;color:var(--fg-2)">HIPAA BAA</span>
+    <span style="color:var(--border-default)">·</span>
+    <span style="font-size:13px;color:var(--fg-2)">SOC 2 Type II</span>
+    <span style="color:var(--border-default)">·</span>
+    <span style="font-size:13px;color:var(--fg-2)">Runs in-VPC</span>
+    <span style="color:var(--border-default)">·</span>
+    <span style="font-size:13px;color:var(--fg-2)">FHIR R4</span>
+    <span style="color:var(--border-default)">·</span>
+    <span style="font-size:13px;color:var(--fg-2)">WCAG 2.2 AA</span>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="grow">© 2026 Vigil Health · An instrument, not a replacement.</div>
+  <a href="#">Privacy</a>
+  <a href="#">Security</a>
+  <a href="#">Contact</a>
+</footer>
+
+</body>
+</html>

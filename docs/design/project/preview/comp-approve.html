@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Approve button + attribution</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.bx { padding: 16px; background: var(--surface-1); border: 1px solid var(--border-default); border-radius: 6px; }
+.bx .lbl { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); font-weight: 500; margin-bottom: 10px; }
+.btn-approve { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px; background: var(--ink-700); border: 1px solid var(--ink-700); border-radius: 6px; color: #fff; font-family: var(--font-sans); font-size: 14px; font-weight: 600; cursor: pointer; }
+.check { width: 16px; height: 16px; }
+.attr { margin-top: 14px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--success-bg); border-radius: 6px; }
+.attr .av { width: 22px; height: 22px; border-radius: 50%; background: var(--success); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+.attr .txt { font-size: 12px; color: var(--success); font-weight: 500; }
+.attr .time { font-family: var(--font-mono); font-size: 11px; color: var(--success); opacity: .7; margin-left: auto; }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Approve · decisive CTA + audit attribution</div>
+  <div class="grid">
+    <div class="bx">
+      <div class="lbl">Before</div>
+      <button class="btn-approve">Approve handoff →</button>
+    </div>
+    <div class="bx">
+      <div class="lbl">After</div>
+      <div class="attr"><span class="av">AP</span><span class="txt">Approved by Dr. Amit Patel · written to EHR</span><span class="time">14:07</span></div>
+    </div>
+  </div>
+</div></body></html>

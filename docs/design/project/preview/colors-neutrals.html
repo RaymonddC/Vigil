@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Neutral spine</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-1); }
+.wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; align-items: stretch; }
+
+/* tonal ramp — flowing strip rather than a 12-cell grid */
+.ramp {
+  height: 72px;
+  border-radius: 6px;
+  background: linear-gradient(to right,
+    #FAFBFC 0%, #F4F6F8 9%, #E9ECF0 18%, #DCE0E6 27%,
+    #C3C9D2 36%, #9AA2AE 45%, #6B7280 55%, #4B5563 64%,
+    #374151 73%, #1F2A36 82%, #121821 91%, #0B0F14 100%);
+  border: 1px solid var(--border-subtle);
+  position: relative;
+}
+.ramp .tick { position: absolute; top: 100%; width: 1px; height: 6px; background: var(--border-default); margin-top: 2px; }
+.ramp .caps { display: flex; justify-content: space-between; position: absolute; top: calc(100% + 10px); left: 0; right: 0; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+
+/* in-use vignette — the neutrals actually working in UI */
+.vign { border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; background: #FFFFFF; }
+.vign .t { padding: 8px 12px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); letter-spacing: 0.06em; text-transform: uppercase; background: #F4F6F8; border-bottom: 1px solid #E9ECF0; }
+.vign .row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #E9ECF0; }
+.vign .row:last-child { border-bottom: none; }
+.vign .dot { width: 6px; height: 6px; border-radius: 50%; background: #6B7280; }
+.vign .nm { font-size: 12px; color: #0B0F14; font-weight: 500; }
+.vign .sub { font-family: var(--font-mono); font-size: 10px; color: #6B7280; margin-left: auto; }
+
+.lgd { display: flex; gap: 14px; margin-top: 22px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.lgd span b { color: var(--fg-1); font-weight: 500; }
+</style>
+</head><body><div class="preview" style="padding:18px 22px 8px">
+  <div class="pv-label">Neutral spine · tonal ramp from paper to ink · used in UI</div>
+  <div class="wrap">
+    <div>
+      <div class="ramp">
+        <span class="caps"><span>gray-0 · paper</span><span>gray-500</span><span>gray-950 · ink</span></span>
+      </div>
+      <div class="lgd">
+        <span><b>warm-cool</b> · slight blue undertone</span>
+        <span><b>12 steps</b> · structure, not noise</span>
+      </div>
+    </div>
+    <div class="vign">
+      <div class="t">roster · gray-50 header</div>
+      <div class="row"><span class="dot"></span><span class="nm">Martinez, A.</span><span class="sub">B-12 · POD 1</span></div>
+      <div class="row"><span class="dot" style="background:#0B0F14"></span><span class="nm">Okafor, C.</span><span class="sub">B-07 · PPD 1</span></div>
+      <div class="row"><span class="dot" style="background:#C3C9D2"></span><span class="nm">Singh, R.</span><span class="sub">B-03 · POD 2</span></div>
+    </div>
+  </div>
+</div></body></html>

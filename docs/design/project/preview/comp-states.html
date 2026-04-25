@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Empty & loading states</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); }
+.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.bx { background: var(--surface-1); border: 1px solid var(--border-default); border-radius: 6px; padding: 18px 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; min-height: 120px; justify-content: center; }
+.bx .lbl { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); font-weight: 500; }
+.bx .msg { font-size: 12px; color: var(--fg-2); }
+.bx .sub { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+.skel { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.sk { height: 10px; background: linear-gradient(90deg, var(--gray-100) 0%, var(--gray-50) 50%, var(--gray-100) 100%); background-size: 200% 100%; border-radius: 3px; animation: sweep 1.2s ease-in-out infinite; }
+.sk:nth-child(2){ width: 70% }
+.sk:nth-child(3){ width: 55% }
+@keyframes sweep { 0%{background-position: 100% 0} 100%{background-position: -100% 0} }
+.err-ic { color: var(--danger); font-family: var(--font-mono); font-weight: 600; font-size: 11px; }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">States · empty · loading · error · all first-class</div>
+  <div class="grid">
+    <div class="bx"><span class="lbl">Empty</span><span class="msg">No pending alerts.</span><span class="sub">Vigil is watching 8 patients.</span></div>
+    <div class="bx"><span class="lbl">Loading</span><div class="skel"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><span class="sub">Drafting · 4–6 s</span></div>
+    <div class="bx"><span class="err-ic">● FHIR UNREACHABLE</span><span class="msg">Can't reach the gateway.</span><span class="sub">Retrying in 10 s</span></div>
+  </div>
+</div></body></html>

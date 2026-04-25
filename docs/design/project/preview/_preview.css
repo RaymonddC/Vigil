@@ -1,0 +1,39 @@
+/* Shared preview card base — cards should have no title/framing,
+   just the content centered. The asset name renders outside the card. */
+@import url('../colors_and_type.css');
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+.preview {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+/* tiny caption under a swatch etc */
+.pv-caption {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+.pv-label {
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: var(--weight-medium);
+}
+
+.pv-row { display: flex; gap: 10px; align-items: flex-end; }
+.pv-col { display: flex; flex-direction: column; gap: 4px; }

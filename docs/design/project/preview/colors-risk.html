@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Risk scale</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.risk-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.rk {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 6px;
+  position: relative;
+}
+.rk .g { font-size: 22px; line-height: 1; }
+.rk .n { font-family: var(--font-sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.rk .h { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+
+.rk--normal   { background: var(--risk-normal-bg);   color: var(--risk-normal); }
+.rk--low      { background: var(--risk-low-bg);      color: var(--risk-low); }
+.rk--medium   { background: var(--risk-medium-bg);   color: var(--risk-medium); }
+.rk--high     { background: var(--risk-high-bg);     color: var(--risk-high); }
+.rk--critical { background: var(--risk-critical-bg); color: var(--risk-critical); }
+
+.rk--critical .g { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Risk scale · five levels · color + glyph + label</div>
+  <div class="risk-grid">
+    <div class="rk rk--normal"><span class="g">○</span><span class="n">Normal</span><span class="h">slate 500</span></div>
+    <div class="rk rk--low"><span class="g">◔</span><span class="n">Low</span><span class="h">teal 700</span></div>
+    <div class="rk rk--medium"><span class="g">◐</span><span class="n">Medium</span><span class="h">amber 700</span></div>
+    <div class="rk rk--high"><span class="g">◕</span><span class="n">High</span><span class="h">orange 700</span></div>
+    <div class="rk rk--critical"><span class="g">●</span><span class="n">Critical</span><span class="h">red 700</span></div>
+  </div>
+</div></body></html>

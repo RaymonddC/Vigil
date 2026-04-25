@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8"><title>SBAR card</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+body { background: var(--surface-0); font-size: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; box-shadow: 0 1px 2px rgba(11,15,20,.03); }
+.hd { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--ink-50); }
+.tag { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--ink-700); letter-spacing: 0.08em; padding: 2px 6px; border: 1px solid var(--ink-100); border-radius: 3px; background: var(--surface-1); }
+.title { font-weight: 600; font-size: 13px; color: var(--fg-1); }
+.bed { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); font-weight: 400; }
+.time { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); display: inline-flex; align-items: center; gap: 6px; }
+.time::before { content: ""; width: 6px; height: 6px; background: var(--risk-critical); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+.sec { display: grid; grid-template-columns: 86px 1fr; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--border-subtle); }
+.sec:last-of-type { border-bottom: none; }
+.sec .k { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--fg-3); text-transform: uppercase; padding-top: 3px; display: flex; align-items: baseline; gap: 6px; }
+.sec .k::before { content: ""; width: 3px; height: 10px; background: var(--ink-300); border-radius: 1px; display: inline-block; }
+.sec .v { font-size: 12px; color: var(--fg-1); line-height: 1.45; }
+.sec .v em { font-style: normal; color: var(--risk-critical); font-weight: 500; background: var(--risk-critical-bg); padding: 0 3px; border-radius: 2px; }
+.ft { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface-0); border-top: 1px solid var(--border-subtle); }
+.ft .src { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.ft .actions { margin-left: auto; display: flex; gap: 6px; }
+.ft .a { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-default); background: var(--surface-1); color: var(--fg-2); font-family: var(--font-sans); cursor: pointer; }
+.ft .a.primary { background: var(--ink-700); border-color: var(--ink-700); color: #fff; font-weight: 500; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+</style>
+</head><body><div class="preview" style="padding:12px 16px">
+  <div class="pv-label" style="margin-bottom:4px">SBAR card · AI-drafted handoff · four sections, cited evidence</div>
+  <div class="card">
+    <div class="hd">
+      <span class="tag">SBAR · DRAFT</span>
+      <span class="title">Martinez, A.</span>
+      <span class="bed">· Bed 12 · POD 1</span>
+      <span class="time">drafted 14:02</span>
+    </div>
+    <div class="sec"><span class="k">Situation</span><span class="v">Tachycardia and relative hypotension since 11:40, now with <em>rising lactate 1.4 → 3.2</em>.</span></div>
+    <div class="sec"><span class="k">Background</span><span class="v">POD 1 bowel resection. Epidural in place. T2DM, HTN.</span></div>
+    <div class="sec"><span class="k">Assessment</span><span class="v">Concern for early septic physiology. <em>qSOFA 2 · NEWS2 8</em>.</span></div>
+    <div class="sec"><span class="k">Recommend</span><span class="v">Bedside eval within 15 min. Repeat lactate, blood cultures, crystalloid challenge.</span></div>
+    <div class="ft">
+      <span class="src">drafted by vigil-ward-agent · sources: 14 vitals, 2 labs</span>
+      <span class="actions"><button class="a">Edit</button><button class="a primary">Approve →</button></span>
+    </div>
+  </div>
+</div></body></html>

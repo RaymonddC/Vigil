@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Surfaces</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.surf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.panel { border-radius: 8px; padding: 0; overflow: hidden; border: 1px solid var(--border-default); }
+.panel .hd { padding: 10px 12px; font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); border-bottom: 1px solid var(--border-subtle); }
+.stack-rows { display: flex; flex-direction: column; }
+.stack-rows .r { padding: 8px 12px; font-size: 11px; display: flex; justify-content: space-between; font-family: var(--font-mono); color: var(--fg-2); }
+.r .sw { width: 40px; height: 14px; border-radius: 3px; border: 1px solid var(--border-subtle); }
+/* dark */
+.dark-panel { background: #0E1116; color: #E6E9EE; border-color: #242B36; }
+.dark-panel .hd { border-color: #1A2029; color: #8B95A3; }
+.dark-panel .r { color: #AEB6C2; }
+.dark-panel .sw { border-color: #242B36; }
+</style>
+</head><body><div class="preview">
+  <div class="pv-label">Surfaces · semantic tokens in both modes</div>
+  <div class="surf-grid">
+    <div class="panel">
+      <div class="hd">Light</div>
+      <div class="stack-rows">
+        <div class="r"><span>surface-0</span><span class="sw" style="background:#FAFBFC"></span></div>
+        <div class="r"><span>surface-1</span><span class="sw" style="background:#FFFFFF"></span></div>
+        <div class="r"><span>surface-2</span><span class="sw" style="background:#F4F6F8"></span></div>
+        <div class="r"><span>surface-3</span><span class="sw" style="background:#E9ECF0"></span></div>
+      </div>
+    </div>
+    <div class="panel dark-panel">
+      <div class="hd">Dark</div>
+      <div class="stack-rows">
+        <div class="r"><span>surface-0</span><span class="sw" style="background:#0E1116"></span></div>
+        <div class="r"><span>surface-1</span><span class="sw" style="background:#141922"></span></div>
+        <div class="r"><span>surface-2</span><span class="sw" style="background:#1A2029"></span></div>
+        <div class="r"><span>surface-3</span><span class="sw" style="background:#242B36"></span></div>
+      </div>
+    </div>
+  </div>
+</div></body></html>
