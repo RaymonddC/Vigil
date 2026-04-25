@@ -205,3 +205,49 @@ Replies for "no FHIR context" / "missing patient_id" return with `result.status.
 ### ℹ️ Nice to have
 - Add `skill` / `patient_id` to the metadata on the early-return failure paths in `sentinel.py:103-108` and `:115-120` so observability stays consistent across success + failure.
 - Re-seed HAPI vitals so PT-001 actually has observations to breach in the demo path (`make seed` from a fresh state).
+
+---
+
+## Re-verification — auth enforced (post-c9c722b)
+
+_Re-run 2026-04-26 by `smoke-test` teammate after team-lead landed the auth fix._
+
+**Result: X-API-Key is now forwarded; MCP returns 200 on every skill. HIGH-severity finding #1 from §"Findings worth flagging" is closed.**
+
+### Setup
+
+- Killed the previous smoke's pair (which had `VIGIL_API_KEY` deliberately *unset* on MCP to bypass the original bug).
+- Relaunched **both** processes with `VIGIL_API_KEY=local-dev-key-anything` exported — i.e. the canonical compose-style configuration where the same key is enforced on both surfaces.
+- Confirmed MCP enforcement is live: `curl -X POST http://localhost:7001/mcp` (no header) → `401 Unauthorized` (expected, single occurrence in `mcp-reverify.log`).
+- Confirmed fix applied at `backend/a2a_agent/mcp_client.py:53,83-84`:
+
+  ```python
+  self._api_key = os.environ.get("VIGIL_API_KEY")
+  ...
+  if self._api_key:
+      headers["X-API-Key"] = self._api_key
+  ```
+
+### Cycle 1 (metadata-hint) — all 5 skills, auth wall up
+
+| `skill_id` requested | resolved (`result.status.message.metadata.skill`) | response excerpt (≤200 chars) | ✅/⚠️ |
+|---|---|---|---|
+| `vigil.screen_vitals`  | `vigil.screen_vitals`  | `Vital screen for \`PT-001\`: no MEWT breaches across \`0\` recent observations. All vitals within thresholds.` | ✅ |
+| `vigil.score_risk`     | `vigil.score_risk`     | `Deterioration risk for \`PT-001\`: band \`low\` (qSOFA \`0 / 3\`, composite \`0.05\`). Rationale: qSOFA=0; No qSOFA criteria met; 1 active condition(s)` | ✅ |
+| `vigil.check_sepsis`   | `vigil.check_sepsis`   | `Sepsis screen for \`PT-001\`: not suspected. Mode \`cdc_ase\`, no criteria met.` | ✅ |
+| `vigil.draft_sbar`     | `vigil.draft_sbar`     | `SBAR for \`PT-001\` — severity \`info\`, recipient \`charge_nurse\` (model \`stub/template\`).  S: Patient shows signs requiring clinical attention. B: Postoperative monitoring detected parameter changes.` | ✅ |
+| `vigil.start_watching` | `vigil.start_watching` | `Vigil's autonomous polling loop is configured at the deployment level via the \`POLL_INTERVAL_SEC\` env var (set to \`0\` in Option 3 to disable). To enable continuous monitoring of \`PT-001\`...` | ✅ |
+
+All five: `HTTP 200`, `result.status.state == "completed"`, non-empty `parts[0].text`, `result.status.message.metadata.skill` echoes the request. Critically, `vigil.draft_sbar` makes **four sequential MCP calls** (`screen_vital_thresholds` + `score_deterioration_risk` + `flag_sepsis_onset` + `generate_escalation_note`) — every one of them must authenticate, otherwise the handler short-circuits to "I couldn't draft an SBAR … MCP tool was unreachable: HTTP 401". The fact that we get a fully-rendered SBAR back proves auth flows through all four.
+
+### MCP-side evidence
+
+`grep "POST /mcp" /tmp/vigil-smoke/mcp-reverify.log`:
+- `200 OK`: 20 occurrences (handshake + 7 logical tool calls)
+- `401 Unauthorized`: 1 occurrence — the deliberate sanity-check curl run **before** the agent calls
+
+No 401s during any of the five agent-driven dispatches.
+
+### Wave-2 gate status
+
+✅ Wave 2 closed. The auth blocker is the only HIGH-severity finding from the original smoke; it's now verified fixed against the running services. The other open items (response in `status.message.parts` vs. `artifacts`; `extensions[0].required: false`) remain MEDIUM/LOW and are not gate-blockers — carry forward into Wave 3 for resolution against the live Prompt Opinion register flow.
