@@ -2,7 +2,7 @@ import { getPatients, type PatientSummary } from "@/lib/api";
 import { PatientsTable } from "@/components/patients-table";
 
 export const metadata = {
-  title: "Patients — Vigil",
+  title: "Roster — Vigil",
 };
 
 /**
@@ -13,11 +13,6 @@ export const metadata = {
  */
 export const dynamic = "force-dynamic";
 
-/**
- * Server Component: fetches patient list from FastAPI backend.
- * Gracefully degrades with an offline notice when backend is unreachable.
- * FRONTEND_SPEC §3.1
- */
 export default async function PatientsPage() {
   let patients: PatientSummary[] = [];
   let offline = false;
@@ -29,63 +24,33 @@ export default async function PatientsPage() {
     offline = true;
   }
 
-  const rosterCount = patients.length;
+  const count = patients.length;
+  const ward = "Ward 4N";
+
   return (
-    <div className="p-6 space-y-5">
-      {/* Page heading */}
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold font-[family-name:var(--font-geist-sans)] text-slate-900 dark:text-slate-50 tracking-tight">
-            Post-operative Patients
-          </h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Sorted by risk · updated live from FHIR
-          </p>
-        </div>
-        {!offline && rosterCount > 0 && (
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="relative inline-flex w-2 h-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-            </span>
-            <span>
-              <span className="font-[family-name:var(--font-geist-mono)] tabular-nums font-semibold text-slate-700 dark:text-slate-200">
-                {rosterCount}
-              </span>
-              <span className="ml-1">on service</span>
-            </span>
-          </div>
-        )}
+    <div className="page">
+      <div className="page__hd">
+        <h1 className="page__title">Roster</h1>
+        <span className="page__sub">
+          {ward} · {count} patient{count === 1 ? "" : "s"} · sorted by risk
+        </span>
       </div>
 
       {offline ? (
-        <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm px-6 py-12 text-center space-y-3">
-          <div className="mx-auto w-10 h-10 flex items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/50">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="text-amber-600 dark:text-amber-400"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
+        <div className="panel">
+          <div className="panel__hd">
+            <span className="t">Backend unavailable</span>
+            <span className="s">FastAPI proxy unreachable</span>
           </div>
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-            Backend unavailable
-          </p>
-          <p className="text-xs text-slate-400 dark:text-slate-500">
-            Cannot reach the FastAPI proxy. Ensure{" "}
-            <code className="font-[family-name:var(--font-geist-mono)] bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px]">
-              NEXT_PUBLIC_API_BASE_URL
-            </code>{" "}
-            is set and the server is running.
-          </p>
+          <div className="panel__body">
+            <p className="text-[13px] text-[var(--fg-2)] leading-relaxed">
+              Cannot reach the FastAPI proxy. Ensure{" "}
+              <code className="mono text-[12px]" style={{ background: "var(--surface-2)", padding: "1px 6px", borderRadius: 3 }}>
+                NEXT_PUBLIC_API_BASE_URL
+              </code>{" "}
+              is set and the server is running.
+            </p>
+          </div>
         </div>
       ) : (
         <PatientsTable patients={patients} />

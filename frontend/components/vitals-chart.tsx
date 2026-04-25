@@ -1,277 +1,263 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
-  ReferenceArea,
-} from 'recharts';
+import * as React from "react";
+import { VitalTile } from "@/components/vital-tile";
+import { Panel } from "@/components/panel";
 
-export interface VitalsDataPoint {
-  t: string;       // time label, e.g. "08:00"
-  hr?: number;
-  spo2?: number;
-  map?: number;
-  rr?: number;
-  tempC?: number;
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export interface VitalSeries {
+  loinc: string;
+  label: string;
+  unit: string;
+  points: Array<{ t: string; v: number }>;
 }
 
 export interface VitalsChartProps {
-  data?: VitalsDataPoint[];
-  /** Initial axis view; internal toggle manages subsequent changes. */
-  initialAxis?: 'all' | 'bp' | 'hr-rr' | 'spo2' | 'temp';
-  /** Formatted time labels ("HH:MM") matching chart t-values where a trigger fired. */
-  triggerTimes?: string[];
-  height?: number;
+  series: VitalSeries[];
+  /** "updated 14:02" — small monospace stamp in the header. */
+  updatedAt?: string;
+  /** Optional vertical flag line (e.g. when alert fired). ISO-8601 string. */
+  flagAt?: string | null;
 }
 
-type AxisMode = 'all' | 'bp' | 'hr-rr' | 'spo2' | 'temp';
+// ─── Constants ─────────────────────────────────────────────────────────────
 
-const SAMPLE_DATA: VitalsDataPoint[] = [
-  { t: '08:00', hr: 82,  spo2: 98, map: 88, rr: 14, tempC: 37.0 },
-  { t: '09:00', hr: 94,  spo2: 96, map: 82, rr: 16, tempC: 37.4 },
-  { t: '10:00', hr: 112, spo2: 94, map: 74, rr: 20, tempC: 38.1 },
-  { t: '10:30', hr: 128, spo2: 91, map: 58, rr: 26, tempC: 38.9 },
-];
-
-const VITAL_CONFIG = {
-  hr:    { stroke: '#DC2626', name: 'HR',   unit: 'bpm' },
-  spo2:  { stroke: '#2563EB', name: 'SpO₂', unit: '%' },
-  map:   { stroke: '#7C3AED', name: 'MAP',  unit: 'mmHg' },
-  rr:    { stroke: '#0891B2', name: 'RR',   unit: '/min' },
-  tempC: { stroke: '#D97706', name: 'Temp', unit: '°C' },
+const LOINC = {
+  HR: "8867-4",
+  SPO2: "59408-5",
+  SBP: "8480-6",
+  DBP: "8462-4",
+  RR: "9279-1",
+  TEMP: "8310-5",
 } as const;
 
-type VitalKey = keyof typeof VITAL_CONFIG;
+const W = 720;
+const H = 200;
+const PAD_L = 36;
+const PAD_R = 10;
+const PAD_T = 14;
+const PAD_B = 24;
+const IW = W - PAD_L - PAD_R;
+const IH = H - PAD_T - PAD_B;
 
-const AXIS_KEYS: Record<AxisMode, VitalKey[]> = {
-  all:     ['hr', 'spo2', 'map', 'rr', 'tempC'],
-  bp:      ['map'],
-  'hr-rr': ['hr', 'rr'],
-  spo2:    ['spo2'],
-  temp:    ['tempC'],
-};
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
-const AXIS_LABELS: Record<AxisMode, string> = {
-  all:     'All',
-  bp:      'BP',
-  'hr-rr': 'HR / RR',
-  spo2:    'SpO₂',
-  temp:    'Temp',
-};
+function findSeries(series: VitalSeries[], loinc: string): VitalSeries | undefined {
+  return series.find((s) => s.loinc === loinc);
+}
 
-// MEWT threshold reference lines — shown only when a single vital group is selected.
-// Source: CLINICAL_EVIDENCE.md §2.3 — Vigil 7-parameter MEWT implementation.
-const MEWT_REFS: Partial<Record<AxisMode, Array<{ value: number; label: string; stroke: string; tier: 'warn' | 'crit' | 'info' }>>> = {
-  bp: [
-    { value: 100, label: 'SBP ≤100', stroke: '#D97706', tier: 'warn' },
-    { value: 90,  label: 'SBP ≤90',  stroke: '#DC2626', tier: 'crit' },
-  ],
-  'hr-rr': [
-    { value: 22,  label: 'RR ≥22',  stroke: '#0891B2', tier: 'info' },
-    { value: 110, label: 'HR >110', stroke: '#D97706', tier: 'warn' },
-    { value: 130, label: 'HR >130', stroke: '#DC2626', tier: 'crit' },
-  ],
-  spo2: [
-    { value: 93, label: 'SpO₂ <93%', stroke: '#D97706', tier: 'warn' },
-    { value: 90, label: 'SpO₂ <90%', stroke: '#DC2626', tier: 'crit' },
-  ],
-  temp: [
-    { value: 36.0, label: 'Temp <36°C', stroke: '#2563EB', tier: 'info' },
-    { value: 38.0, label: 'Temp >38°C', stroke: '#D97706', tier: 'warn' },
-  ],
-};
+function pickLatest(series?: VitalSeries): { v: number | null; t: string | null } {
+  if (!series || series.points.length === 0) return { v: null, t: null };
+  const sorted = [...series.points].sort(
+    (a, b) => new Date(b.t).getTime() - new Date(a.t).getTime()
+  );
+  return { v: sorted[0].v, t: sorted[0].t };
+}
 
-// Threshold bands — a soft horizontal stripe marking the danger zone above/below
-// each critical reference line. Opacity kept low so patient trace stays primary.
-const THRESHOLD_BANDS: Partial<Record<AxisMode, Array<{ y1: number; y2: number; fill: string }>>> = {
-  bp: [
-    { y1: 0, y2: 90, fill: '#FEE2E2' },
-  ],
-  'hr-rr': [
-    { y1: 130, y2: 200, fill: '#FEE2E2' },
-  ],
-  spo2: [
-    { y1: 0, y2: 90, fill: '#FEE2E2' },
-  ],
-  temp: [
-    { y1: 39, y2: 45, fill: '#FEE2E2' },
-  ],
-};
+/**
+ * Build (sbp, dbp) → MAP series. If only SBP is present we use SBP as the
+ * fallback; the design treats the middle trace as MAP regardless.
+ */
+function buildMapSeries(series: VitalSeries[]): { points: Array<{ t: string; v: number }>; unit: string; label: string } {
+  const sbp = findSeries(series, LOINC.SBP);
+  const dbp = findSeries(series, LOINC.DBP);
+  if (!sbp) return { points: [], unit: "mmHg", label: "MAP" };
 
-const AXIS_MODES: AxisMode[] = ['all', 'bp', 'hr-rr', 'spo2', 'temp'];
+  const dbpMap = new Map<string, number>();
+  if (dbp) {
+    for (const p of dbp.points) dbpMap.set(p.t, p.v);
+  }
+  const points = sbp.points.map((p) => {
+    const dbpVal = dbpMap.get(p.t);
+    if (dbpVal != null) {
+      return { t: p.t, v: Math.round((p.v + 2 * dbpVal) / 3) };
+    }
+    return { t: p.t, v: p.v };
+  });
+  return { points, unit: "mmHg", label: "MAP" };
+}
 
-export function VitalsChart({
-  data = SAMPLE_DATA,
-  initialAxis = 'all',
-  triggerTimes = [],
-  height = 320,
-}: VitalsChartProps) {
-  const [axis, setAxis] = useState<AxisMode>(initialAxis);
-  const keys = AXIS_KEYS[axis];
-  const refs = MEWT_REFS[axis] ?? [];
-  const bands = THRESHOLD_BANDS[axis] ?? [];
+/** Map a raw value into chart pixel space. */
+function makeScaler(min: number, max: number) {
+  return (v: number, i: number, total: number): [number, number] => {
+    const x = PAD_L + (i / Math.max(1, total - 1)) * IW;
+    const y = PAD_T + (1 - (v - min) / Math.max(0.0001, max - min)) * IH;
+    return [x, y];
+  };
+}
+
+function pathFromPoints(points: Array<[number, number]>): string {
+  if (points.length === 0) return "";
+  return (
+    "M" +
+    points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" L")
+  );
+}
+
+// ─── Component ─────────────────────────────────────────────────────────────
+
+export function VitalsChart({ series, updatedAt, flagAt }: VitalsChartProps) {
+  const hr = findSeries(series, LOINC.HR);
+  const spo2 = findSeries(series, LOINC.SPO2);
+  const temp = findSeries(series, LOINC.TEMP);
+  const mapBuilt = buildMapSeries(series);
+
+  // Chronological ordering — earliest first → "now" on the right.
+  const sortedHr   = hr   ? [...hr.points].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime())   : [];
+  const sortedMap  = [...mapBuilt.points].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
+  const sortedSpo2 = spo2 ? [...spo2.points].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime()) : [];
+
+  const scaleHr  = makeScaler(50, 160);
+  const scaleMap = makeScaler(40, 100);
+  const scaleSp  = makeScaler(85, 100);
+
+  const hrPts   = sortedHr.map((p, i) => scaleHr (p.v, i, sortedHr.length));
+  const mapPts  = sortedMap.map((p, i) => scaleMap(p.v, i, sortedMap.length));
+  const spo2Pts = sortedSpo2.map((p, i) => scaleSp(p.v, i, sortedSpo2.length));
+
+  // Optional flag x-position (proportion of HR series timespan).
+  let flagX: number | null = null;
+  if (flagAt && sortedHr.length > 1) {
+    const flagMs = new Date(flagAt).getTime();
+    const t0 = new Date(sortedHr[0].t).getTime();
+    const tN = new Date(sortedHr[sortedHr.length - 1].t).getTime();
+    if (tN > t0 && flagMs >= t0 && flagMs <= tN) {
+      const frac = (flagMs - t0) / (tN - t0);
+      flagX = PAD_L + frac * IW;
+    }
+  }
+
+  // Latest values for the tile row underneath.
+  const latestHr   = pickLatest(hr).v;
+  const latestMap  = sortedMap.length > 0 ? sortedMap[sortedMap.length - 1].v : null;
+  const latestSpo2 = pickLatest(spo2).v;
+  const latestTemp = pickLatest(temp).v;
+
+  const fmt = (v: number | null, decimals = 0) =>
+    v == null ? "—" : decimals > 0 ? v.toFixed(decimals) : Math.round(v).toString();
 
   return (
-    <div className="space-y-3">
-      {/* Axis toggle pills */}
-      <div
-        className="flex items-center gap-1.5 flex-wrap"
-        role="group"
-        aria-label="Select vital sign view"
-      >
-        {AXIS_MODES.map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setAxis(mode)}
-            aria-pressed={axis === mode}
-            className={[
-              'px-3 py-1 rounded-md text-xs font-medium transition-colors min-h-[44px]',
-              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B5FFF]',
-              axis === mode
-                ? 'bg-[#0B5FFF] text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
-            ].join(' ')}
-          >
-            {AXIS_LABELS[mode]}
-          </button>
-        ))}
+    <Panel
+      title="Vitals · 24 hours"
+      meta={updatedAt ? `updated ${updatedAt}` : undefined}
+      right={
+        <span
+          style={{
+            display: "flex",
+            gap: 14,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--fg-3)",
+          }}
+        >
+          <LegendChip color="var(--risk-critical)" label="HR" />
+          <LegendChip color="var(--ink-700)" label="MAP" />
+          <LegendChip color="var(--success)" label="SpO₂" />
+        </span>
+      }
+      bodyClassName=""
+    >
+      <div className="panel__body" style={{ padding: "10px 14px 4px" }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", height: 200, display: "block" }}
+          role="img"
+          aria-label="24-hour trend of HR, MAP, SpO₂"
+        >
+          {/* gridlines */}
+          <g stroke="var(--border-subtle)" strokeWidth="1">
+            {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
+              <line
+                key={i}
+                x1={PAD_L}
+                x2={W - PAD_R}
+                y1={PAD_T + f * IH}
+                y2={PAD_T + f * IH}
+              />
+            ))}
+          </g>
+          {/* y-axis labels (HR scale 50–160) */}
+          <g fill="var(--fg-3)" fontFamily="var(--font-mono)" fontSize="10">
+            <text x="4" y={PAD_T + 4}>160</text>
+            <text x="4" y={PAD_T + IH / 2 + 4}>105</text>
+            <text x="4" y={PAD_T + IH + 4}>50</text>
+          </g>
+          {/* flag line */}
+          {flagX != null && (
+            <line
+              x1={flagX}
+              x2={flagX}
+              y1={PAD_T}
+              y2={PAD_T + IH}
+              stroke="var(--risk-critical)"
+              strokeWidth="1"
+              strokeDasharray="2 3"
+            />
+          )}
+          {/* traces */}
+          {hrPts.length > 0 && (
+            <path d={pathFromPoints(hrPts)} stroke="var(--risk-critical)" strokeWidth="1.5" fill="none" />
+          )}
+          {mapPts.length > 0 && (
+            <path d={pathFromPoints(mapPts)} stroke="var(--ink-700)" strokeWidth="1.5" fill="none" />
+          )}
+          {spo2Pts.length > 0 && (
+            <path d={pathFromPoints(spo2Pts)} stroke="var(--success)" strokeWidth="1.5" fill="none" />
+          )}
+          {/* x-axis labels */}
+          <g fill="var(--fg-3)" fontFamily="var(--font-mono)" fontSize="10">
+            {["−24h", "−18", "−12", "−6", "now"].map((label, i) => (
+              <text
+                key={i}
+                x={PAD_L + (i / 4) * IW}
+                y={H - 6}
+                textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+              >
+                {label}
+              </text>
+            ))}
+          </g>
+          {/* empty-state hint when zero data */}
+          {hrPts.length === 0 && mapPts.length === 0 && spo2Pts.length === 0 && (
+            <text
+              x={W / 2}
+              y={H / 2}
+              textAnchor="middle"
+              fill="var(--fg-3)"
+              fontFamily="var(--font-mono)"
+              fontSize="11"
+            >
+              No vitals recorded in the last 24 h.
+            </text>
+          )}
+        </svg>
       </div>
 
-      {/* MEWT threshold legend — appears when a filtered axis is selected */}
-      {refs.length > 0 && (
-        <div
-          className="flex items-center gap-3 flex-wrap text-[11px] text-slate-500 dark:text-slate-400"
-          aria-label="MEWT thresholds"
-        >
-          <span className="inline-flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-400 shrink-0 uppercase tracking-wider text-[10px]">
-            MEWT
-          </span>
-          {refs.map((r) => (
-            <span key={r.label} className="inline-flex items-center gap-1.5">
-              <svg width="16" height="8" aria-hidden="true">
-                <line
-                  x1="0" y1="4" x2="16" y2="4"
-                  stroke={r.stroke}
-                  strokeWidth="1.5"
-                  strokeDasharray="4 3"
-                />
-              </svg>
-              <span style={{ color: r.stroke }} className="font-medium">{r.label}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="vital-grid">
+        <VitalTile label="HR"   value={fmt(latestHr)}      unit="bpm"  alert={latestHr   != null && latestHr   > 110} />
+        <VitalTile label="MAP"  value={fmt(latestMap)}     unit="mmHg" alert={latestMap  != null && latestMap  < 65} />
+        <VitalTile label="SpO₂" value={fmt(latestSpo2)}    unit="%"    alert={latestSpo2 != null && latestSpo2 < 95} />
+        <VitalTile label="Temp" value={fmt(latestTemp, 1)} unit="°C"   alert={latestTemp != null && latestTemp > 38} />
+      </div>
+    </Panel>
+  );
+}
 
-      {/* Recharts multi-line chart */}
-      <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 8, right: 20, left: -4, bottom: 8 }}>
-          <CartesianGrid stroke="#F1F5F9" strokeDasharray="2 4" vertical={false} />
-
-          {/* Danger-zone bands — rendered behind trace at low opacity */}
-          {bands.map((b, i) => (
-            <ReferenceArea
-              key={`band-${i}`}
-              y1={b.y1}
-              y2={b.y2}
-              fill={b.fill}
-              fillOpacity={0.35}
-              stroke="none"
-              ifOverflow="extendDomain"
-            />
-          ))}
-
-          <XAxis
-            dataKey="t"
-            stroke="#94A3B8"
-            fontSize={11}
-            tickLine={false}
-            axisLine={{ stroke: '#E2E8F0' }}
-            tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
-          />
-          <YAxis
-            stroke="#94A3B8"
-            fontSize={11}
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontFamily: 'var(--font-geist-mono)', fill: '#64748B' }}
-            width={40}
-          />
-          <Tooltip
-            cursor={{ stroke: '#CBD5E1', strokeDasharray: '3 3', strokeWidth: 1 }}
-            contentStyle={{
-              background: '#FFFFFF',
-              border: '1px solid #E2E8F0',
-              borderRadius: 8,
-              fontSize: 12,
-              fontFamily: 'var(--font-geist-mono)',
-              boxShadow: '0 4px 12px -2px rgb(15 23 42 / 0.08)',
-              padding: '8px 10px',
-            }}
-            labelStyle={{ color: '#0F172A', fontWeight: 600, marginBottom: 4 }}
-            itemStyle={{ padding: '1px 0' }}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            formatter={(rawValue: any, name: any): [string, string] => {
-              const n = typeof rawValue === 'number' ? rawValue : 0;
-              const cfg = Object.values(VITAL_CONFIG).find((c) => c.name === name);
-              const formatted = n % 1 !== 0 ? n.toFixed(1) : String(n);
-              return [`${formatted}${cfg ? ` ${cfg.unit}` : ''}`, String(name)];
-            }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 11, fontFamily: 'var(--font-inter)', paddingTop: 8 }}
-            iconType="plainline"
-            iconSize={14}
-          />
-
-          {/* MEWT threshold reference lines — dashed, color-coded */}
-          {refs.map((ref) => (
-            <ReferenceLine
-              key={`mewt-${ref.value}`}
-              y={ref.value}
-              stroke={ref.stroke}
-              strokeDasharray="4 3"
-              strokeWidth={1}
-              strokeOpacity={ref.tier === 'crit' ? 0.9 : 0.6}
-            />
-          ))}
-
-          {/* Trigger markers — vertical dashed lines at alert-fire timestamps */}
-          {triggerTimes.map((t, i) => (
-            <ReferenceLine
-              key={`trigger-${i}-${t}`}
-              x={t}
-              stroke="#DC2626"
-              strokeWidth={1.5}
-              strokeDasharray="6 3"
-              label={{ value: '▼', position: 'top', fontSize: 10, fill: '#DC2626' }}
-            />
-          ))}
-
-          {/* Vital sign lines — no dots for clean demo recording */}
-          {keys.map((key) => (
-            <Line
-              key={key}
-              type="monotone"
-              dataKey={key}
-              stroke={VITAL_CONFIG[key].stroke}
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4, strokeWidth: 2, stroke: '#FFFFFF' }}
-              name={VITAL_CONFIG[key].name}
-              isAnimationActive={false}
-            />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+function LegendChip({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ whiteSpace: "nowrap" }}>
+      <span
+        style={{
+          display: "inline-block",
+          width: 10,
+          height: 2,
+          background: color,
+          marginRight: 4,
+          verticalAlign: "middle",
+        }}
+      />
+      {label}
+    </span>
   );
 }

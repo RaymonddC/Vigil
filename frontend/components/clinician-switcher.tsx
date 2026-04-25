@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 
 import {
   CLINICIANS,
@@ -30,6 +30,19 @@ function initialsOf(name: string): string {
     .join("");
 }
 
+/** Compact role chip — the design rules call for an UPPERCASE mono token. */
+function shortRole(role: string): string {
+  // Strip any trailing comma-detail and uppercase the leading 1–2 words.
+  const head = role.split(/[,(—–-]/)[0].trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  if (words[0].toLowerCase() === "rn") return "RN";
+  if (words[0].toLowerCase() === "charge") return "CHARGE";
+  if (words[0].toLowerCase() === "intensivist") return "ICU";
+  if (words[0].toLowerCase() === "rapid") return "RAPID";
+  return words[0].toUpperCase();
+}
+
 // useSyncExternalStore adapters — the switcher is driven by localStorage,
 // which React treats as an external store. getServerSnapshot pins SSR and the
 // first hydration render to CLINICIANS[0] so markup matches; React then swaps
@@ -55,8 +68,6 @@ export function ClinicianSwitcher() {
     CLINICIANS.find((c) => c.id === selectedId) ?? CLINICIANS[0];
 
   const handleSelect = (id: string) => {
-    // setSelectedClinicianId dispatches the change event; useSyncExternalStore
-    // picks it up and re-renders — no need to setState locally.
     setSelectedClinicianId(id);
   };
 
@@ -64,36 +75,25 @@ export function ClinicianSwitcher() {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Switch clinician"
-        className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FFF] focus-visible:ring-offset-1 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900"
+        className="clipill"
       >
-        <span
-          aria-hidden="true"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0B5FFF] text-[11px] font-semibold text-white"
-        >
+        <span className="av" aria-hidden="true">
           {initialsOf(current.name)}
         </span>
-        <span className="hidden sm:flex flex-col items-start leading-tight text-left">
-          <span className="text-sm font-medium text-slate-900 dark:text-slate-50">
-            {current.name}
-          </span>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            {current.role}
-          </span>
-        </span>
-        <ChevronDown
-          aria-hidden="true"
-          className="h-4 w-4 text-slate-400 dark:text-slate-500"
-        />
+        <span className="name">{current.name}</span>
+        <span className="role">{shortRole(current.role)}</span>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" sideOffset={6} className="min-w-[240px]">
-        {/* Base UI 1.4 requires GroupLabel to live inside a Group — rendering
-            the label bare throws MenuGroupRootContext error #31 on open. */}
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="min-w-[260px] p-0"
+      >
         <DropdownMenuGroup>
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--fg-3)] px-3 pt-2 pb-1">
             Signed in as
           </DropdownMenuLabel>
-          <DropdownMenuSeparator />
+          <DropdownMenuSeparator className="my-1" />
           {CLINICIANS.map((c) => {
             const active = c.id === selectedId;
             return (
@@ -101,24 +101,34 @@ export function ClinicianSwitcher() {
                 key={c.id}
                 onClick={() => handleSelect(c.id)}
                 aria-label={`Switch to ${c.name}, ${c.role}`}
-                className="flex items-start gap-2 py-1.5"
+                className="flex items-center gap-2.5 px-3 py-2 cursor-pointer"
               >
-                {/* Fixed-width check slot so rows don't shift when active changes. */}
                 <span
                   aria-hidden="true"
-                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center"
+                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
+                  style={{
+                    background: active ? "var(--ink-700)" : "var(--gray-200)",
+                    color: active ? "#fff" : "var(--fg-2)",
+                  }}
                 >
-                  {active ? (
-                    <Check className="h-4 w-4 text-[#0B5FFF]" />
-                  ) : null}
+                  {initialsOf(c.name)}
                 </span>
-                <span className="flex flex-col leading-tight">
-                  <span className="text-sm font-medium text-slate-900 dark:text-slate-50">
+                <span className="flex flex-col leading-tight flex-1 min-w-0">
+                  <span className="text-[12px] font-medium text-[var(--fg-1)] truncate">
                     {c.name}
                   </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {c.role}
-                  </span>
+                </span>
+                <span
+                  className="text-[10px] uppercase tracking-wider text-[var(--fg-3)]"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
+                  {shortRole(c.role)}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="flex h-3 w-3 shrink-0 items-center justify-center"
+                >
+                  {active ? <Check className="h-3 w-3 text-[var(--ink-700)]" /> : null}
                 </span>
               </DropdownMenuItem>
             );
