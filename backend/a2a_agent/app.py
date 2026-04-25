@@ -75,7 +75,7 @@ app_builder = A2AFastAPIApplication(
     http_handler=request_handler,
 )
 
-app = app_builder.build()
+app = app_builder.build(rpc_url="/a2a")
 
 # SEC-05: API key enforcement — exempt AgentCard (public per A2A spec) (H1).
 _A2A_SKIP_PREFIXES = ("/.well-known/agent-card.json", "/docs", "/openapi.json", "/redoc")
