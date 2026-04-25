@@ -18,6 +18,7 @@
 # -----------------------------------------------------------------------------
 
 services:
+  # Internal — Postgres backing HAPI. Never publicly routed.
   hapi-db:
     image: postgres:15-alpine
     container_name: vigil-hapi-db
@@ -34,6 +35,8 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Portfolio / dev only — FHIR store for the dashboard. Judges' FHIR data
+  # flows through Prompt Opinion's workspace via A2A metadata, not this HAPI.
   hapi:
     # Built from Dockerfile.hapi: upstream hapiproject/hapi:v7.2.0 plus
     # a statically-linked busybox for the healthcheck probe. See the
@@ -84,9 +87,9 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # MCP server — 4 clinical tools. Prompt Opinion runtime calls this service
-  # through Caddy at https://<SITE_DOMAIN>/mcp. Internal only on the docker
-  # network; Caddy terminates TLS and proxies.
+  # Internal — A2A agent's private tool layer (the 4 clinical tools).
+  # Under Option 3 the agent calls this over the docker bridge; the public
+  # /mcp Caddy route is a Path-A holdover and not part of the submission.
   # ---------------------------------------------------------------------------
   mcp:
     # mcp is the declared builder for the shared vigil-backend image.
@@ -118,8 +121,9 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # A2A agent — AgentCard + JSON-RPC. A2A_PUBLIC_URL is the public URL that
-  # lands in the AgentCard so external agents can call back.
+  # Public — hackathon submission surface. Serves the AgentCard at
+  # /.well-known/agent-card.json and JSON-RPC at /a2a. A2A_PUBLIC_URL lands
+  # inside the card so Prompt Opinion's runtime calls back to the right URL.
   # ---------------------------------------------------------------------------
   a2a:
     # Shares vigil-backend:latest with mcp (built there). See mcp service.
@@ -155,7 +159,9 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # FastAPI proxy — dashboard API + approve (FHIR write path).
+  # Portfolio — dashboard backend (FHIR reads + clinician approve write
+  # path). Reached publicly only via the Next.js /api/* server-side proxy,
+  # never directly. Not part of the hackathon submission surface.
   # ---------------------------------------------------------------------------
   api:
     # Shares vigil-backend:latest with mcp (built there). See mcp service.
@@ -198,8 +204,10 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Next.js frontend — server-rendered app. Hits the api service internally
-  # via BACKEND_URL for RSC, and same-origin /api via Caddy for client calls.
+  # Portfolio — clinician dashboard (Next.js prod build). Public catch-all
+  # under https://${SITE_DOMAIN}/. Hits the api service internally via
+  # BACKEND_URL for RSC, and same-origin /api via Caddy for client calls.
+  # Not part of the hackathon submission surface.
   # ---------------------------------------------------------------------------
   frontend:
     build:
@@ -228,9 +236,10 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Caddy reverse proxy — terminates TLS and routes to the four app services.
-  # Auto Let's Encrypt via ACME HTTP-01 (requires ports 80 + 443 open).
-  # Set SITE_DOMAIN in .env to the hostname you want certs issued for.
+  # Public ingress — Caddy reverse proxy (TLS + Let's Encrypt). The only
+  # process that binds the host's 80/443. Routes /a2a + /.well-known/...
+  # to the agent (submission surface) and /, /api/* to the dashboard
+  # (portfolio surface). See deploy/aws/Caddyfile for the routing table.
   # ---------------------------------------------------------------------------
   caddy:
     image: caddy:2.8-alpine

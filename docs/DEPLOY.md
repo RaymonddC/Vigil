@@ -5,6 +5,60 @@ and the AgentCard is fetchable from `/.well-known/agent-card.json`.
 
 ---
 
+## Public surfaces (post-hackathon-pivot)
+
+The submission target is **Option 3 — Independent A2A Agent**. We run a
+"dual-surface" deploy on a single EC2: the **A2A agent** is the hackathon
+submission, and the **clinician dashboard** stays alongside as a personal
+portfolio piece. Both share the same docker-compose stack but are framed
+for different audiences.
+
+Important: Prompt Opinion injects FHIR context into A2A messages, so
+**judges' FHIR data comes from THEIR Prompt Opinion workspace, not our
+HAPI**. HAPI is dev / portfolio scaffolding only.
+
+### Hackathon submission URLs (Option 3)
+
+These are the only URLs judges or the Prompt Opinion runtime hit:
+
+| Surface | URL | Notes |
+|---|---|---|
+| AgentCard (public) | `https://${SITE_DOMAIN}/.well-known/agent-card.json` | A2A spec requires the root well-known path. Caddy's `handle /.well-known/agent-card.json` block routes this to `a2a:9000`. The card is exempt from the `X-API-Key` middleware. |
+| JSON-RPC endpoint | `POST https://${SITE_DOMAIN}/a2a` | The card declares `url: https://${SITE_DOMAIN}/a2a` (set via `A2A_PUBLIC_URL` env). Caddy's `handle /a2a*` block routes this to `a2a:9000`. (Known mount-path bug — see `docs/A2A_REFACTOR_AUDIT.md`; fix lands with the skill-dispatch refactor.) |
+| Auth | `X-API-Key: <VIGIL_API_KEY>` header | Declared in the card under `securitySchemes.apiKey`. Judges configure this in the Prompt Opinion **Add Connection** dialog. The AgentCard fetch is unauthenticated by design (A2A spec). |
+
+To register the agent in Prompt Opinion's Workspace Hub (per the Agents
+Assemble walkthrough): paste the JSON-RPC URL above, click **Check**,
+paste the API key, and toggle the FHIR-context extension on.
+
+### Portfolio surfaces (NOT what judges hit)
+
+These exist for the dashboard portfolio narrative and run on the same
+EC2, but are not part of the hackathon submission contract:
+
+| Surface | URL | Behind it |
+|---|---|---|
+| Clinician dashboard | `https://${SITE_DOMAIN}/` | Next.js prod build (`frontend` service). |
+| Dashboard backend | `https://${SITE_DOMAIN}/api/*` | Routed via the Next.js server-side proxy (which injects `X-API-Key`) → FastAPI proxy (`api` service) → HAPI. |
+| FHIR store (portfolio only) | internal `http://hapi:8080/fhir` | HAPI R4 with seeded synthetic patients. Used by the dashboard for portfolio storytelling only — judges' workspace data flows in through A2A metadata instead. |
+
+The portfolio surfaces could be split onto a separate domain or EC2 in
+the future; for now they share the box to keep ops simple.
+
+### Internal-only services
+
+Reachable only on the docker bridge network. Under the dual-surface
+model these are the agent's private tool layer plus the dashboard's
+local FHIR store — judges should never need to hit any of these:
+
+| Service | Endpoint | Role |
+|---|---|---|
+| `mcp` | `http://mcp:7001/mcp` | The 4 clinical tools. The A2A agent's private tool layer. Caddy still has a `handle /mcp*` block as a holdover from the Path-A (MCP-server submission) plan; under Option 3 it is unused and can be removed in a follow-up cleanup. |
+| `hapi` | `http://hapi:8080/fhir` | FHIR store for the dashboard / dev. Bound to `127.0.0.1:8080` on the host for SSH-tunnelled debugging only (SEC-10). |
+| `hapi-db` | `hapi-db:5432` | Postgres backing HAPI. |
+
+---
+
 ## Service map
 
 | Service | Port | Exposed publicly? | Purpose |
