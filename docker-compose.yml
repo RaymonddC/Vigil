@@ -138,7 +138,15 @@ services:
       # external A2A callers hit this URL directly from the AgentCard.
       A2A_PUBLIC_URL: ${A2A_PUBLIC_URL:-https://${SITE_DOMAIN:-localhost}/a2a}
       POLL_INTERVAL_SEC: "900"
+      # Persist the SBAR review queue on a named volume so it survives
+      # rebuilds and doesn't need a writable /app/backend/api/ directory.
+      # Shared with the api service so agent-enqueued alerts are visible
+      # to the proxy's approve flow (the api container reads from the
+      # same named volume).
+      VIGIL_REVIEW_QUEUE_PATH: /var/lib/vigil/review_queue.db
       LOG_LEVEL: INFO
+    volumes:
+      - vigil-review-queue:/var/lib/vigil
     depends_on:
       hapi:
         condition: service_healthy
