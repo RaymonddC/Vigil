@@ -520,12 +520,12 @@ The extension key `ai.promptopinion/fhir-context` is the signal Prompt Opinion u
 
 ## 3. A2A AgentCard Contract
 
-Shape targets the **A2A v1** AgentCard spec (canonical reference: `prompt-opinion/po-adk-python/shared/app_factory.py`). The card is loaded into `a2a.types.AgentCard` from the installed `a2a-python` SDK. Wire keys are camelCase via the SDK's `to_camel_custom` alias generator; the SDK serves the card via `model_dump(exclude_none=True, by_alias=True)`, so anything not in the SDK's model gets stripped on the way out.
+Shape targets the **A2A v1** AgentCard spec (canonical reference: `prompt-opinion/po-adk-python/shared/app_factory.py`). The card is loaded by `app.py` through a thin `AgentCardV1` subclass (see §3.4) so the v1 wire shapes survive the round-trip through the installed v0.3 `a2a-python` SDK; the SDK serves the card via `model_dump(exclude_none=True, by_alias=True)`.
 
 **Endpoints (Option-3 deployment):**
 
 - `GET /.well-known/agent-card.json` — public; whitelisted from API-key middleware (`backend/a2a_agent/app.py::_A2A_SKIP_PREFIXES`).
-- `POST /a2a` — JSON-RPC entrypoint (`message/send`, `tasks/get`, …). The card's top-level `url` and `additionalInterfaces[0].url` both point here.
+- `POST /a2a` — JSON-RPC entrypoint (`message/send`, `tasks/get`, …). The card's top-level `url` and `supportedInterfaces[0].url` both point here.
 - `POST /tick` — Vigil-internal admin route, not advertised on the card. Triggers `run_cycle_for_all_patients` for the dashboard's "Tick Now" button.
 
 The agent card lives at `backend/a2a_agent/agent_card.json` and is loaded by `app.py` at startup; the `A2A_PUBLIC_URL` env var (set by `deploy/aws/user-data.sh` from `SITE_DOMAIN`) overrides the top-level `url` before validation, so the production deploy ships the canonical HTTPS URL while the dev shape stays valid JSON pointing at `http://localhost:9000/a2a`.
@@ -538,7 +538,6 @@ The agent card lives at `backend/a2a_agent/agent_card.json` and is loaded by `ap
   "description": "Continuously monitors postoperative and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs. Drafts SBAR escalation notes for clinician review.",
   "version": "1.0.0",
   "url": "http://localhost:9000/a2a",
-  "protocolVersion": "0.3.0",
   "provider": {
     "organization": "Team Vigil (Agents Assemble 2026)",
     "url": "https://github.com/raymond/vigil"
@@ -566,8 +565,8 @@ The agent card lives at `backend/a2a_agent/agent_card.json` and is loaded by `ap
       }
     ]
   },
-  "additionalInterfaces": [
-    { "transport": "JSONRPC", "url": "http://localhost:9000/a2a" }
+  "supportedInterfaces": [
+    { "url": "http://localhost:9000/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0" }
   ],
   "skills": [
     { "id": "vigil.screen_vitals",  "name": "Screen vitals for early-warning thresholds", "description": "Runs MEWT against the patient's most recent vitals. Returns triggered/not, breach list with severity, narrative summary.", "tags": ["screen", "vitals", "mewt"] },
@@ -577,13 +576,19 @@ The agent card lives at `backend/a2a_agent/agent_card.json` and is loaded by `ap
     { "id": "vigil.start_watching", "name": "Start autonomous watching",                 "description": "Begins background monitoring for the named patient. Optional. Demo-only.", "tags": ["watch", "monitor"] }
   ],
   "securitySchemes": {
-    "apiKey": { "type": "apiKey", "in": "header", "name": "X-API-Key", "description": "API key required to access this agent." }
+    "apiKey": {
+      "apiKeySecurityScheme": {
+        "name": "X-API-Key",
+        "location": "header",
+        "description": "API key required to access this agent."
+      }
+    }
   },
   "security": [ { "apiKey": [] } ]
 }
 ```
 
-Field names use `snake_case` in the Python model (e.g. `default_input_modes`, `security_schemes`, `additional_interfaces`); the wire JSON uses camelCase via the SDK's alias generator. Both forms parse on input. The SDK injects `"preferredTransport": "JSONRPC"` on serialization (the field defaults to `'JSONRPC'` when omitted), so it appears on the wire even though the source JSON omits it.
+Two parent-injected fields appear on the wire even though the source JSON omits them: `"preferredTransport": "JSONRPC"` and `"protocolVersion": "0.3.0"`. Both come from the v0.3 `AgentCard` defaults that we don't override in the subclass; they're harmless alongside the v1 `supportedInterfaces` declaration. When the SDK ships a v1-native card class these defaults disappear.
 
 ### 3.1 Skill catalogue
 
@@ -615,23 +620,37 @@ Inside Vigil there are two independent paths that produce SBARs:
 - The **autonomous poll loop** (`app.py::_poll_loop`, also reachable via `POST /tick`) is the only path that enqueues alerts to the SQLite review queue (`backend/api/review_queue.py::enqueue_alert`). The clinician dashboard surfaces these and a human approve writes the FHIR `Communication` + `AuditEvent` via the FastAPI proxy (`§6.4`).
 - The **A2A `vigil.draft_sbar` skill** returns the SBAR prose to the calling host and stops. It does **not** enqueue, because Prompt Opinion's launchpad chat *is* the human-in-the-loop surface for the Option-3 path; double-enqueuing would produce duplicate clinician work. The agent never POSTs to FHIR; nothing on the A2A path writes anywhere except the in-memory `TaskStore`.
 
-### 3.4 v1 schema notes & SDK-version gap
+### 3.4 v1 schema notes & the `AgentCardV1` subclass
 
 A2A v1 (per `po-adk-python`) tightens a few fields relative to the v0.x schema this codebase shipped on:
 
-- `preferredTransport` is dropped at the top level — `additionalInterfaces[].protocolBinding` carries the equivalent.
 - `capabilities.stateTransitionHistory` MUST be `false` (we set it explicitly).
-- `securitySchemes.apiKey` uses the nested form `{ "apiKeySecurityScheme": { "name": ..., "location": "header", ... } }` (note `location`, not `in`) and `security: [{"apiKey": []}]` references it.
-- The FHIR-context extension URI is `https://app.promptopinion.ai/schemas/a2a/v1/fhir-context` (the v0 form was `ai.promptopinion/fhir-context`; we've updated to v1).
+- `securitySchemes.apiKey` uses the nested form `{ "apiKeySecurityScheme": { "name": ..., "location": "header", ... } }` — note `location`, not `in` — and `security: [{"apiKey": []}]` references it by key.
+- `supportedInterfaces` replaces v0.3's `additionalInterfaces`; each entry is `{url, protocolBinding, protocolVersion}` instead of `{transport, url}`.
+- The FHIR-context extension URI is `https://app.promptopinion.ai/schemas/a2a/v1/fhir-context` (the v0 form was `ai.promptopinion/fhir-context`).
 - Per-scope `required` flags live inside `extensions[].params.scopes[].required`; the extension's top-level `required` stays `false` (declares that the agent functions without context if the host doesn't have one to share).
 
-**Installed-SDK gap.** `a2a-python` (the SDK in `pyproject.toml`) is on the v0.3 schema and does not yet model `supportedInterfaces`, the nested `apiKeySecurityScheme` form, or `apiKeySecurityScheme.location`. Probing the SDK shows that:
+**Installed-SDK gap and the subclass escape hatch.** `a2a-python` (in `pyproject.toml`) is on the v0.3 schema. Three of the v1 wire fields above don't survive a round-trip through the parent's typed Pydantic fields: `supportedInterfaces` is silently dropped (extra field), the nested `apiKeySecurityScheme` form silently misvalidates as `MutualTLSSecurityScheme` (the discriminated union picks the first compatible variant; mTLS has no required fields), and `apiKeySecurityScheme.location` would fail validation (the parent accepts `in` only).
 
-- `supportedInterfaces` is silently dropped on parse (extra field) and never reaches the wire when the SDK re-serializes.
-- The nested `apiKeySecurityScheme` form silently misvalidates as `MutualTLSSecurityScheme` (the union picks the first compatible variant; mTLS has no required fields), which would advertise the wrong auth scheme to callers.
-- `apiKeySecurityScheme.location` is rejected; the SDK accepts `in` only (mapped to OpenAPI 3.0 `In` enum).
+We adopt the same escape hatch the reference does (`po-adk-python/shared/app_factory.py`): subclass and override the field types so the v1 nested shapes pass through as raw containers.
 
-The shipped `agent_card.json` therefore uses the SDK-compatible camelCase form (`additionalInterfaces` + flat `securitySchemes` with `in: "header"`) so the served wire bytes round-trip correctly. When `a2a-sdk` ships a v1 release with `AgentCardV1`, swap the file to the strict v1 shape and revisit `app.py::AgentCard.model_validate`.
+```python
+# backend/a2a_agent/agent_card_v1.py
+from typing import Any
+from a2a.types import AgentCard, AgentExtension
+from pydantic import Field
+
+class AgentExtensionV1(AgentExtension):
+    params: dict[str, Any] | None = Field(default=None)
+
+class AgentCardV1(AgentCard):
+    supportedInterfaces: list[dict[str, Any]] = Field(default_factory=list)
+    securitySchemes: dict[str, Any] | None = None
+```
+
+`app.py` then loads the card via `AgentCardV1.model_validate(_card_data)` instead of the parent class. A round-trip smoke verified that `securitySchemes.apiKey.apiKeySecurityScheme.location`, `supportedInterfaces[].protocolBinding`/`protocolVersion`, and `extensions[0].params.scopes` all survive serialization on the way out.
+
+Two harmless v0.3-defaulted fields still appear on the served wire because the subclass doesn't override them: `preferredTransport: "JSONRPC"` and `protocolVersion: "0.3.0"`. Both are tolerated alongside the v1 declarations; if Prompt Opinion's `Add Connection → Check` flags either, add explicit overrides to `AgentCardV1`. When `a2a-sdk` ships a v1-native card class with the matching shapes, drop `agent_card_v1.py` and switch `app.py` back to importing `AgentCard` directly.
 
 ---
 
