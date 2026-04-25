@@ -22,8 +22,8 @@ from typing import Any
 from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCard
 
+from backend.a2a_agent.agent_card_v1 import AgentCardV1
 from backend.a2a_agent.mcp_client import VigilMcpClient
 from backend.a2a_agent.sentinel import PostopSentinelExecutor
 from backend.a2a_agent.tick import run_cycle_for_all_patients
@@ -56,7 +56,7 @@ _card_data = json.loads(_card_path.read_text())
 if os.environ.get("A2A_PUBLIC_URL"):
     _card_data["url"] = os.environ["A2A_PUBLIC_URL"]
 
-agent_card = AgentCard.model_validate(_card_data)
+agent_card = AgentCardV1.model_validate(_card_data)
 
 # ---------------------------------------------------------------------------
 # Wire up executor → handler → application

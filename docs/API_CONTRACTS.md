@@ -520,74 +520,118 @@ The extension key `ai.promptopinion/fhir-context` is the signal Prompt Opinion u
 
 ## 3. A2A AgentCard Contract
 
-Shape derived from `a2a-python` (`src/a2a/types.py`): `AgentCard`, `AgentCapabilities`, `AgentSkill`, `AgentProvider`, `AgentExtension`. Source: `https://github.com/google/a2a-python/blob/main/src/a2a/types.py`.
+Shape targets the **A2A v1** AgentCard spec (canonical reference: `prompt-opinion/po-adk-python/shared/app_factory.py`). The card is loaded into `a2a.types.AgentCard` from the installed `a2a-python` SDK. Wire keys are camelCase via the SDK's `to_camel_custom` alias generator; the SDK serves the card via `model_dump(exclude_none=True, by_alias=True)`, so anything not in the SDK's model gets stripped on the way out.
 
-**Endpoint:** Serve at `GET /.well-known/agent-card.json` (a2a-sdk uses this path — note: NOT `agent.json`; the sdk's middleware explicitly whitelists `agent-card.json`, see `po-adk-python/shared/middleware.py`).
+**Endpoints (Option-3 deployment):**
 
-**Vigil's AgentCard JSON**
+- `GET /.well-known/agent-card.json` — public; whitelisted from API-key middleware (`backend/a2a_agent/app.py::_A2A_SKIP_PREFIXES`).
+- `POST /a2a` — JSON-RPC entrypoint (`message/send`, `tasks/get`, …). The card's top-level `url` and `additionalInterfaces[0].url` both point here.
+- `POST /tick` — Vigil-internal admin route, not advertised on the card. Triggers `run_cycle_for_all_patients` for the dashboard's "Tick Now" button.
+
+The agent card lives at `backend/a2a_agent/agent_card.json` and is loaded by `app.py` at startup; the `A2A_PUBLIC_URL` env var (set by `deploy/aws/user-data.sh` from `SITE_DOMAIN`) overrides the top-level `url` before validation, so the production deploy ships the canonical HTTPS URL while the dev shape stays valid JSON pointing at `http://localhost:9000/a2a`.
+
+**Vigil's AgentCard JSON** (matches `backend/a2a_agent/agent_card.json` 1:1)
 
 ```json
 {
-  "name": "Vigil Postop Sentinel",
-  "description": "Continuously monitors postop and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs, then drafts SBAR escalation notes for the clinical team.",
-  "version": "0.1.0",
+  "name": "Vigil — Postop & Postpartum Sentinel",
+  "description": "Continuously monitors postoperative and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs. Drafts SBAR escalation notes for clinician review.",
+  "version": "1.0.0",
   "url": "http://localhost:9000/a2a",
-  "preferred_transport": "JSONRPC",
-  "protocol_version": "0.2",
+  "protocolVersion": "0.3.0",
   "provider": {
     "organization": "Team Vigil (Agents Assemble 2026)",
     "url": "https://github.com/raymond/vigil"
   },
-  "documentation_url": "https://github.com/raymond/vigil/blob/main/docs/API_CONTRACTS.md",
-  "default_input_modes":  ["application/json", "text/plain"],
-  "default_output_modes": ["application/json", "text/plain"],
+  "documentationUrl": "https://github.com/raymond/vigil/blob/main/docs/API_CONTRACTS.md",
+  "defaultInputModes":  ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
   "capabilities": {
-    "streaming": true,
-    "push_notifications": false,
-    "state_transition_history": false,
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false,
     "extensions": [
       {
-        "uri": "ai.promptopinion/fhir-context",
-        "description": "Accepts FHIR server URL, bearer token, and patient id via A2A message metadata under the key matching 'fhir-context'.",
-        "required": true,
+        "uri": "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context",
+        "description": "FHIR context allowing the agent to query a FHIR server securely. Vigil reads the context from A2A message metadata under any key containing the substring 'fhir-context' and translates {fhirUrl, fhirToken, patientId} into the three SHARP HTTP headers when calling its MCP tools.",
+        "required": false,
         "params": {
-          "metadata_key_suffix": "fhir-context",
-          "fields": ["fhirUrl", "fhirToken", "patientId"]
+          "scopes": [
+            { "name": "patient/Patient.rs",        "required": true },
+            { "name": "patient/Observation.rs",    "required": true },
+            { "name": "patient/Condition.rs",      "required": true },
+            { "name": "patient/MedicationRequest.rs" }
+          ]
         }
       }
     ]
   },
-  "skills": [
-    {
-      "id": "vigil.monitor_patient",
-      "name": "Monitor patient for deterioration",
-      "description": "End-to-end screen: pulls recent vitals and labs, runs MEWT + qSOFA + CDC ASE, and returns a structured alert with an SBAR note when any trigger fires.",
-      "tags": ["healthcare", "postop", "postpartum", "sepsis", "early-warning"],
-      "examples": [
-        "Check patient-42 for signs of deterioration in the last 4 hours.",
-        "Screen this postpartum patient for preeclampsia red flags and sepsis."
-      ],
-      "input_modes":  ["application/json", "text/plain"],
-      "output_modes": ["application/json", "text/plain"]
-    },
-    {
-      "id": "vigil.explain_alert",
-      "name": "Explain an existing alert",
-      "description": "Given a prior alert id, returns the evidence trail (which vitals, which criteria, which LLM rationale).",
-      "tags": ["healthcare", "explainability"],
-      "examples": ["Why did you escalate patient-42 at 12:01?"],
-      "input_modes":  ["application/json", "text/plain"],
-      "output_modes": ["application/json", "text/plain"]
-    }
+  "additionalInterfaces": [
+    { "transport": "JSONRPC", "url": "http://localhost:9000/a2a" }
   ],
-  "security_schemes": {
-    "apiKey": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+  "skills": [
+    { "id": "vigil.screen_vitals",  "name": "Screen vitals for early-warning thresholds", "description": "Runs MEWT against the patient's most recent vitals. Returns triggered/not, breach list with severity, narrative summary.", "tags": ["screen", "vitals", "mewt"] },
+    { "id": "vigil.score_risk",     "name": "Score deterioration risk",                  "description": "Computes qSOFA and a composite deterioration band (low/moderate/high). Returns score, rationale, and contributing signals.", "tags": ["risk", "qsofa", "news2"] },
+    { "id": "vigil.check_sepsis",   "name": "Check for sepsis onset",                    "description": "Applies CDC Adult Sepsis Event criteria (SIRS + infection + organ dysfunction). Returns suspicion verdict with cited evidence.", "tags": ["sepsis", "ase", "infection"] },
+    { "id": "vigil.draft_sbar",     "name": "Draft SBAR escalation note",                "description": "Combines all three screens with the LLM-drafted Situation/Background/Assessment/Recommendation handoff. Returns the prose for clinician review.", "tags": ["sbar", "escalate", "handoff"] },
+    { "id": "vigil.start_watching", "name": "Start autonomous watching",                 "description": "Begins background monitoring for the named patient. Optional. Demo-only.", "tags": ["watch", "monitor"] }
+  ],
+  "securitySchemes": {
+    "apiKey": { "type": "apiKey", "in": "header", "name": "X-API-Key", "description": "API key required to access this agent." }
   },
   "security": [ { "apiKey": [] } ]
 }
 ```
 
-Field names use `snake_case` when constructed via the `AgentCard` Pydantic class in Python; the wire JSON uses `camelCase` via the model's alias generator (e.g. `preferredTransport`, `defaultInputModes`, `protocolVersion`, `securitySchemes`). Both are accepted on parse. **[Note: the alias generator behavior is inferred from a2a-python conventions; we will confirm at build time and fix if the sdk emits snake_case on the wire.]**
+Field names use `snake_case` in the Python model (e.g. `default_input_modes`, `security_schemes`, `additional_interfaces`); the wire JSON uses camelCase via the SDK's alias generator. Both forms parse on input. The SDK injects `"preferredTransport": "JSONRPC"` on serialization (the field defaults to `'JSONRPC'` when omitted), so it appears on the wire even though the source JSON omits it.
+
+### 3.1 Skill catalogue
+
+Each skill is a single-purpose handler in `backend/a2a_agent/sentinel.py`. The text response is plain prose suitable for chat surfaces (Prompt Opinion's launchpad chat); structured detail rides as JSON in the `Task.metadata` artifact when the caller wants it.
+
+| Skill ID | Triggering text examples | MCP tool(s) called | Text response shape |
+|---|---|---|---|
+| `vigil.screen_vitals` | "screen vitals", "any breach in the last 4h", "MEWT", "early-warning" | `screen_vital_thresholds` | One sentence: *"MEWT triggered: SBP 86 (red, <90) and HR 126 (yellow, ≥120) at 11:48Z; 18 obs scanned."* When clean: *"No MEWT breach across 18 observations in the last 240 min."* |
+| `vigil.score_risk` | "deterioration risk", "qSOFA", "how worried", "score this patient" | `score_deterioration_risk` | Two sentences: qSOFA + risk band line, then the deterministic rationale and any contributing comorbidities. |
+| `vigil.check_sepsis` | "sepsis", "ASE", "septic", "infection workup" | `flag_sepsis_onset` | One paragraph: verdict (`sepsis_suspected: true/false`), mode (`cdc_ase` vs. `sirs_fallback`), the bullet list of criteria met, and the onset estimate when present. |
+| `vigil.draft_sbar` | "SBAR", "draft an escalation", "write the handoff", "escalate" | All three screens above + `generate_escalation_note` | Full SBAR prose (S/B/A/R blocks) followed by recipient role and severity. **No review-queue enqueue happens here** (see §3.3). |
+| `vigil.start_watching` | "watch this patient", "monitor in the background", "start polling" | none — toggles in-process state on the autonomous loop (see `app.py::_poll_loop`) | One-sentence ack with the cadence and patient id. Demo-only; production deploy keeps `POLL_INTERVAL_SEC=0`. |
+
+The previous draft of this section listed `vigil.monitor_patient` and `vigil.explain_alert`. Both are gone. The first folded into `vigil.draft_sbar` (which is the actual end-to-end escalation flow); the second is deferred per `docs/A2A_REFACTOR_AUDIT.md` Open Q5.
+
+### 3.2 Skill dispatch (two-strategy routing)
+
+The A2A `Message` shape has no native `skill_id` field. Vigil resolves the target skill in `backend/a2a_agent/skill_router.py::resolve_skill` using two strategies, in order:
+
+1. **Metadata hint.** If the inbound `message.metadata` carries a key whose suffix is `skill-id` (e.g. `"http://vigil.local/schemas/a2a/v1/skill-id": "vigil.draft_sbar"`), use that value directly. Mirrors the substring-match convention used for `fhir-context` in §4. This is the path Prompt Opinion's launchpad takes when the user invokes a skill explicitly.
+2. **Keyword fallback.** If no metadata hint is present, scan `message.parts[*].text` for the per-skill trigger keywords listed in the §3.1 table. The exact keyword map is the source of truth in `skill_router.py`; treat the column above as illustrative, not exhaustive. Ties resolve in the order the table is written (most specific skills first).
+
+If neither strategy resolves a skill, the router falls back to `vigil.draft_sbar` so the launchpad-chat path always returns useful prose. Per-skill error envelopes follow the `ToolStatus` discriminator from §1; on failure the executor emits a one-line readable summary in `text` and surfaces the structured `ToolError` on the task artifact.
+
+### 3.3 Write semantics — `draft_sbar` does not enqueue
+
+Inside Vigil there are two independent paths that produce SBARs:
+
+- The **autonomous poll loop** (`app.py::_poll_loop`, also reachable via `POST /tick`) is the only path that enqueues alerts to the SQLite review queue (`backend/api/review_queue.py::enqueue_alert`). The clinician dashboard surfaces these and a human approve writes the FHIR `Communication` + `AuditEvent` via the FastAPI proxy (`§6.4`).
+- The **A2A `vigil.draft_sbar` skill** returns the SBAR prose to the calling host and stops. It does **not** enqueue, because Prompt Opinion's launchpad chat *is* the human-in-the-loop surface for the Option-3 path; double-enqueuing would produce duplicate clinician work. The agent never POSTs to FHIR; nothing on the A2A path writes anywhere except the in-memory `TaskStore`.
+
+### 3.4 v1 schema notes & SDK-version gap
+
+A2A v1 (per `po-adk-python`) tightens a few fields relative to the v0.x schema this codebase shipped on:
+
+- `preferredTransport` is dropped at the top level — `additionalInterfaces[].protocolBinding` carries the equivalent.
+- `capabilities.stateTransitionHistory` MUST be `false` (we set it explicitly).
+- `securitySchemes.apiKey` uses the nested form `{ "apiKeySecurityScheme": { "name": ..., "location": "header", ... } }` (note `location`, not `in`) and `security: [{"apiKey": []}]` references it.
+- The FHIR-context extension URI is `https://app.promptopinion.ai/schemas/a2a/v1/fhir-context` (the v0 form was `ai.promptopinion/fhir-context`; we've updated to v1).
+- Per-scope `required` flags live inside `extensions[].params.scopes[].required`; the extension's top-level `required` stays `false` (declares that the agent functions without context if the host doesn't have one to share).
+
+**Installed-SDK gap.** `a2a-python` (the SDK in `pyproject.toml`) is on the v0.3 schema and does not yet model `supportedInterfaces`, the nested `apiKeySecurityScheme` form, or `apiKeySecurityScheme.location`. Probing the SDK shows that:
+
+- `supportedInterfaces` is silently dropped on parse (extra field) and never reaches the wire when the SDK re-serializes.
+- The nested `apiKeySecurityScheme` form silently misvalidates as `MutualTLSSecurityScheme` (the union picks the first compatible variant; mTLS has no required fields), which would advertise the wrong auth scheme to callers.
+- `apiKeySecurityScheme.location` is rejected; the SDK accepts `in` only (mapped to OpenAPI 3.0 `In` enum).
+
+The shipped `agent_card.json` therefore uses the SDK-compatible camelCase form (`additionalInterfaces` + flat `securitySchemes` with `in: "header"`) so the served wire bytes round-trip correctly. When `a2a-sdk` ships a v1 release with `AgentCardV1`, swap the file to the strict v1 shape and revisit `app.py::AgentCard.model_validate`.
 
 ---
 
