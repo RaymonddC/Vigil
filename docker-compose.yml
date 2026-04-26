@@ -109,7 +109,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
       FHIR_BASE_URL: http://hapi:8080/fhir
-      ALLOWED_FHIR_HOSTS: http://hapi:8080/fhir,http://localhost:8080/fhir
+      # SEC-01 SSRF allowlist — workspace HAPI (dev/portfolio) plus the
+      # Prompt Opinion FHIR host (every workspace lives under /api/workspaces/<id>/fhir).
+      # Without the PO entry the agent's MCP tools 403 with ssrf_blocked when invoked
+      # via the launchpad — empirically verified end-to-end against PO 2026-04-27.
+      ALLOWED_FHIR_HOSTS: http://hapi:8080/fhir,http://localhost:8080/fhir,https://app.promptopinion.ai
       CORS_ORIGINS: ${CORS_ORIGINS:-https://${SITE_DOMAIN:-localhost}}
       CACHE_TTL_SEC: "300"
       LOG_LEVEL: INFO
