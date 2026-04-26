@@ -52,9 +52,15 @@ FHIR_BASE_URL = os.environ.get("FHIR_BASE_URL", "http://localhost:8080/fhir")
 _card_path = Path(__file__).parent / "agent_card.json"
 _card_data = json.loads(_card_path.read_text())
 
-# Override URL from env if deploying publicly
+# Override URL from env if deploying publicly. A2A v1 has both the legacy
+# top-level `url` (still required by the installed v0.3 SDK) and the canonical
+# `supportedInterfaces[].url`. Both must point at the public URL or Prompt
+# Opinion will read the latter and call back at localhost.
 if os.environ.get("A2A_PUBLIC_URL"):
-    _card_data["url"] = os.environ["A2A_PUBLIC_URL"]
+    _public_url = os.environ["A2A_PUBLIC_URL"]
+    _card_data["url"] = _public_url
+    for _iface in _card_data.get("supportedInterfaces", []):
+        _iface["url"] = _public_url
 
 agent_card = AgentCardV1.model_validate(_card_data)
 
