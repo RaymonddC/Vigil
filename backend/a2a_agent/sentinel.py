@@ -1,19 +1,29 @@
-"""Vigil Postop Sentinel — A2A agent executor with 7-state machine.
+"""Vigil Postop Sentinel — A2A agent executor with skill dispatch.
 
-State machine: IDLE → POLLING → SCREENING → RISK_SCORING →
-SEPSIS_CHECK → ESCALATING → AWAITING_REVIEW.
+Inbound A2A messages are routed to one of five clinical skills:
 
-Each state calls one MCP tool via VigilMcpClient with SHARP headers
-extracted from the incoming A2A message metadata. The agent NEVER
-writes to FHIR — it posts drafts to the review queue only.
+  vigil.screen_vitals  → MEWT vital threshold screen
+  vigil.score_risk     → qSOFA + composite trend risk
+  vigil.check_sepsis   → CDC Adult Sepsis Event surveillance
+  vigil.draft_sbar     → all 3 screens + SBAR escalation note (no enqueue)
+  vigil.start_watching → informational; deployment-level loop control
 
-Reference: BUILD_PLAN.md B7, API_CONTRACTS.md §3–§4,
-           PROMPT_OPINION_INTEGRATION.md §3.1
+The autonomous polling loop (see ``app.py``) and the historical 7-state
+machine still live in the codebase, but the request-response path is the
+hackathon submission's primary surface — Prompt Opinion's launchpad chat
+invokes one skill at a time and renders the chat-ready text we return.
+
+`vigil.draft_sbar` returns the SBAR text only — it does NOT enqueue to
+the SQLite review queue. In Option 3, Prompt Opinion's general chat is
+the human-in-the-loop surface; the autonomous loop continues to enqueue
+for the dashboard's HITL view.
+
+Reference: docs/A2A_REFACTOR_AUDIT.md, BUILD_PLAN.md B7,
+           API_CONTRACTS.md §3–§4, PROMPT_OPINION_INTEGRATION.md §3.1
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -35,23 +45,39 @@ from backend.a2a_agent.fhir_hook import (
     fhir_metadata_to_sharp_headers,
 )
 from backend.a2a_agent.mcp_client import McpClientError, VigilMcpClient
-from backend.api.review_queue import enqueue_alert
-from backend.schemas import AgentState
+from backend.a2a_agent.skill_router import SkillId, resolve_skill
 
 logger = logging.getLogger("vigil.a2a.sentinel")
 
+# Tool-status values that indicate a precondition failure (vs. a clinical
+# trigger). ``triggered`` is a clinical signal, not an error.
+_TOOL_ERROR_STATUSES = {
+    "bad_input",
+    "fhir_error",
+    "fhir_not_found",
+    "llm_error",
+}
+
 
 class PostopSentinelExecutor(AgentExecutor):
-    """A2A agent executor implementing the Vigil state machine.
+    """A2A agent executor implementing skill dispatch.
 
-    Each `execute()` call runs one full screening cycle:
-    POLLING → SCREENING → RISK_SCORING → SEPSIS_CHECK →
-    [ESCALATING → AWAITING_REVIEW if triggered] → done.
+    Each ``execute()`` call:
+      1. Extracts SHARP context from ``message.metadata``.
+      2. Resolves the requested skill via :func:`resolve_skill`.
+      3. Dispatches to the matching ``_handle_*`` coroutine, which calls
+         one or more MCP tools and formats a chat-friendly reply.
+      4. Emits a single ``TaskState.completed`` event with the reply text.
 
-    Note on exact a2a-sdk class names: This implementation targets
-    a2a-sdk >=0.2.0. Class names (AgentExecutor, RequestContext,
-    EventQueue) were verified against the installed package at build
-    time per API_CONTRACTS.md §3 caveat.
+    Failure modes (missing FHIR context, MCP unreachable, tool-level error
+    envelope) all complete the task with a one-line "I couldn't compute
+    X because Y" message rather than raising — Prompt Opinion's general
+    chat surfaces the text either way, and a friendly sentence reads
+    cleaner than a stack trace.
+
+    Note on a2a-sdk class names: Targets a2a-sdk >=0.2.0. ``AgentExecutor``,
+    ``RequestContext``, ``EventQueue`` were verified against the installed
+    package per API_CONTRACTS.md §3 caveat.
     """
 
     def __init__(self, mcp: VigilMcpClient) -> None:
@@ -62,246 +88,87 @@ class PostopSentinelExecutor(AgentExecutor):
         context: RequestContext,
         event_queue: EventQueue,
     ) -> None:
-        """Run the full screening state machine for one patient."""
-        state = AgentState.IDLE
+        """Resolve the inbound skill and dispatch."""
         task_id = context.task_id or str(uuid.uuid4())
         context_id = context.context_id or str(uuid.uuid4())
 
+        # --- Extract FHIR context from A2A metadata ---
+        metadata = None
+        if context.message and context.message.metadata:
+            metadata = context.message.metadata
+
+        _, fhir_dict = extract_fhir_from_metadata(metadata)
+        if not fhir_dict or not fhir_dict.get("fhirUrl"):
+            logger.warning("Missing FHIR context in A2A metadata")
+            await self._emit_completed(
+                event_queue, task_id, context_id,
+                "I couldn't run any check because the request was missing "
+                "FHIR connection context. Please ensure the FHIR-context "
+                "extension is enabled on this agent connection.",
+            )
+            return
+
+        sharp_headers = fhir_metadata_to_sharp_headers(fhir_dict)
+        patient_id = fhir_dict.get("patientId")
+        if not patient_id:
+            logger.warning("Missing patient_id in SHARP context")
+            await self._emit_completed(
+                event_queue, task_id, context_id,
+                "I couldn't run any check because no patient_id was "
+                "supplied in the FHIR context. Pick a patient in Prompt "
+                "Opinion before invoking this skill.",
+            )
+            return
+
+        # --- Resolve skill ---
+        skill = resolve_skill(context.message)
+        logger.info(
+            "Dispatching A2A skill",
+            extra={"skill": skill.value, "patient_id": patient_id},
+        )
+
+        # --- Dispatch ---
         try:
-            # --- Extract FHIR context from A2A metadata ---
-            metadata = None
-            if context.message and context.message.metadata:
-                metadata = context.message.metadata
-
-            _, fhir_dict = extract_fhir_from_metadata(metadata)
-            if not fhir_dict or not fhir_dict.get("fhirUrl"):
-                logger.error("Missing FHIR context in A2A metadata")
-                await self._emit_status(
-                    event_queue, task_id, context_id,
-                    TaskState.failed,
-                    "Missing FHIR context in message metadata. "
-                    "Ensure fhir-context metadata is provided.",
-                    final=True,
+            if skill is SkillId.SCREEN_VITALS:
+                text = await self._handle_screen_vitals(
+                    sharp_headers, patient_id
                 )
-                return
-
-            sharp_headers = fhir_metadata_to_sharp_headers(fhir_dict)
-            patient_id = fhir_dict.get("patientId", "unknown")
-            logger.info(
-                "Sentinel cycle starting",
-                extra={"patient_id": patient_id, "state": state},
-            )
-
-            # --- POLLING → SCREENING ---
-            state = AgentState.POLLING
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.working,
-                f"[{state}] Starting screening cycle for {patient_id}",
-            )
-
-            state = AgentState.SCREENING
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.working,
-                f"[{state}] Running MEWT vital threshold screen",
-            )
-            screen_result = await self._mcp.call_tool(
-                "screen_vital_thresholds",
-                arguments={"patient_id": patient_id},
-                sharp_headers=sharp_headers,
-            )
-            logger.info(
-                "Screening complete",
-                extra={
-                    "patient_id": patient_id,
-                    "screen_status": _safe_get(screen_result, "status"),
-                },
-            )
-
-            # --- RISK_SCORING ---
-            state = AgentState.RISK_SCORING
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.working,
-                f"[{state}] Computing qSOFA + composite trend score",
-            )
-            risk_result = await self._mcp.call_tool(
-                "score_deterioration_risk",
-                arguments={"patient_id": patient_id},
-                sharp_headers=sharp_headers,
-            )
-            logger.info(
-                "Risk scoring complete",
-                extra={
-                    "patient_id": patient_id,
-                    "risk_band": _safe_get(risk_result, "risk_band"),
-                },
-            )
-
-            # --- SEPSIS_CHECK ---
-            state = AgentState.SEPSIS_CHECK
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.working,
-                f"[{state}] Running CDC Adult Sepsis Event screen",
-            )
-            sepsis_result = await self._mcp.call_tool(
-                "flag_sepsis_onset",
-                arguments={"patient_id": patient_id},
-                sharp_headers=sharp_headers,
-            )
-            logger.info(
-                "Sepsis check complete",
-                extra={
-                    "patient_id": patient_id,
-                    "sepsis_suspected": _safe_get(
-                        sepsis_result, "sepsis_suspected"
-                    ),
-                },
-            )
-
-            # --- Decide: escalate or normal ---
-            screen_triggered = (
-                _safe_get(screen_result, "status") == "triggered"
-            )
-            sepsis_triggered = _safe_get(
-                sepsis_result, "sepsis_suspected"
-            ) is True
-            risk_high = _safe_get(risk_result, "risk_band") in (
-                "moderate",
-                "high",
-            )
-
-            if not (screen_triggered or sepsis_triggered or risk_high):
-                # NORMAL — no escalation needed
-                state = AgentState.IDLE
-                logger.info(
-                    "Screening cycle complete — NORMAL",
-                    extra={"patient_id": patient_id},
+            elif skill is SkillId.SCORE_RISK:
+                text = await self._handle_score_risk(
+                    sharp_headers, patient_id
                 )
-                await self._emit_status(
-                    event_queue, task_id, context_id,
-                    TaskState.completed,
-                    f"[{state}] All screens normal for {patient_id}. "
-                    "No escalation required.",
-                    final=True,
+            elif skill is SkillId.CHECK_SEPSIS:
+                text = await self._handle_check_sepsis(
+                    sharp_headers, patient_id
                 )
-                return
-
-            # --- ESCALATING ---
-            state = AgentState.ESCALATING
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.working,
-                f"[{state}] Generating SBAR escalation note",
-            )
-            escalation_result = await self._mcp.call_tool(
-                "generate_escalation_note",
-                arguments={
-                    "patient_id": patient_id,
-                    "vitals_result": screen_result,
-                    "risk_result": risk_result,
-                    "sepsis_result": sepsis_result,
-                    "recipient_role": (
-                        "rapid_response"
-                        if sepsis_triggered
-                        else "charge_nurse"
-                    ),
-                },
-                sharp_headers=sharp_headers,
-            )
-            escalation_data = _unwrap_tool_result(escalation_result)
-            logger.info(
-                "Escalation note generated",
-                extra={
-                    "patient_id": patient_id,
-                    "severity": escalation_data.get("severity"),
-                    "model_used": escalation_data.get("model_used"),
-                },
-            )
-
-            # --- AWAITING_REVIEW — persist SBAR draft to review queue ---
-            state = AgentState.AWAITING_REVIEW
-            severity = escalation_data.get("severity") or "info"
-            narrative = escalation_data.get("narrative") or ""
-            sbar = escalation_data.get("sbar") or {}
-            communication_draft = (
-                escalation_data.get("communication_draft") or {}
-            )
-            model_used = escalation_data.get("model_used") or "unknown"
-            resolved_recipient = escalation_data.get("recipient_role") or (
-                "rapid_response" if sepsis_triggered else "charge_nurse"
-            )
-
-            alert_id = await asyncio.to_thread(
-                enqueue_alert,
-                patient_id,
-                severity,
-                sbar,
-                narrative,
-                resolved_recipient,
-                model_used,
-                communication_draft,
-            )
-
-            logger.info(
-                "Sentinel cycle complete — ESCALATED",
-                extra={
-                    "patient_id": patient_id,
-                    "severity": severity,
-                    "state": state,
-                    "alert_id": alert_id,
-                },
-            )
-
-            summary = (
-                f"[{state}] ALERT {alert_id} for {patient_id} "
-                f"(severity={severity}). "
-                "Draft posted to review queue. "
-                "Agent does NOT write to FHIR — "
-                "awaiting clinician approval.\n\n"
-                f"{narrative}"
-            )
-
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.completed,
-                summary,
-                final=True,
-                metadata={
-                    "alert_id": alert_id,
-                    "patient_id": patient_id,
-                    "severity": severity,
-                },
-            )
-
-        except McpClientError as e:
-            logger.error(
-                "MCP tool call failed",
-                extra={
-                    "state": state,
-                    "error": str(e),
-                },
-            )
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.failed,
-                f"[{state}] MCP tool error: {e}",
-                final=True,
-            )
-
-        except Exception as e:
+            elif skill is SkillId.DRAFT_SBAR:
+                text = await self._handle_draft_sbar(
+                    sharp_headers, patient_id
+                )
+            elif skill is SkillId.START_WATCHING:
+                text = await self._handle_start_watching(
+                    sharp_headers, patient_id
+                )
+            else:  # pragma: no cover — exhaustive enum dispatch
+                text = (
+                    f"I don't recognise the skill `{skill}`. "
+                    "Try asking me to screen vitals, score risk, "
+                    "check sepsis, or draft an SBAR."
+                )
+        except Exception as e:  # noqa: BLE001 — surface as friendly chat reply
             logger.exception(
-                "Unexpected error in sentinel executor",
-                extra={"state": state},
+                "Unhandled error in skill handler",
+                extra={"skill": skill.value, "patient_id": patient_id},
             )
-            await self._emit_status(
-                event_queue, task_id, context_id,
-                TaskState.failed,
-                f"[{state}] Internal error: {e}",
-                final=True,
+            text = (
+                f"I couldn't complete `{skill.value}` for `{patient_id}` "
+                f"because of an internal error: {e}."
             )
+
+        await self._emit_completed(
+            event_queue, task_id, context_id, text,
+            metadata={"skill": skill.value, "patient_id": patient_id},
+        )
 
     async def cancel(
         self,
@@ -316,6 +183,271 @@ class PostopSentinelExecutor(AgentExecutor):
             TaskState.canceled,
             "Sentinel cycle canceled by request.",
             final=True,
+        )
+
+    # ---------------------------------------------------------------
+    # Skill handlers — each calls 1+ MCP tools and returns chat text.
+    # ---------------------------------------------------------------
+
+    async def _handle_screen_vitals(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> str:
+        """Run screen_vital_thresholds and format the MEWT result."""
+        try:
+            raw = await self._mcp.call_tool(
+                "screen_vital_thresholds",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't screen vitals for `{patient_id}` because "
+                f"the MCP tool was unreachable: {e}."
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="screen vitals")
+        if err is not None:
+            return err
+
+        breaches = data.get("breaches") or []
+        scanned = data.get("scanned_count", 0)
+        status = data.get("status", "ok")
+
+        if not breaches:
+            return (
+                f"Vital screen for `{patient_id}`: no MEWT breaches across "
+                f"`{scanned}` recent observations. All vitals within "
+                "thresholds."
+            )
+
+        red = sum(1 for b in breaches if b.get("severity") == "red")
+        yellow = sum(1 for b in breaches if b.get("severity") == "yellow")
+        header = (
+            f"Vital screen for `{patient_id}` (status `{status}`): "
+            f"`{len(breaches)}` MEWT breach(es) — `{red}` red, `{yellow}` "
+            f"yellow — across `{scanned}` observations."
+        )
+        bullets = [
+            f"- `{b.get('label', '?')}` `{b.get('value', '?')} "
+            f"{b.get('unit', '')}` (threshold `{b.get('threshold', '?')}`, "
+            f"`{b.get('severity', '?')}`)"
+            for b in breaches[:5]
+        ]
+        return "\n".join([header, *bullets])
+
+    async def _handle_score_risk(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> str:
+        """Run score_deterioration_risk and format risk band + qSOFA."""
+        try:
+            raw = await self._mcp.call_tool(
+                "score_deterioration_risk",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't score deterioration risk for `{patient_id}` "
+                f"because the MCP tool was unreachable: {e}."
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="score risk")
+        if err is not None:
+            return err
+
+        band = data.get("risk_band", "unknown")
+        qsofa = data.get("qsofa_score")
+        composite = data.get("composite_risk")
+        rationale = data.get("rationale") or "no rationale provided"
+        comorbid = data.get("contributing_conditions") or []
+
+        composite_str = (
+            f"`{composite:.2f}`" if isinstance(composite, (int, float))
+            else "`?`"
+        )
+        lines = [
+            f"Deterioration risk for `{patient_id}`: band `{band}` "
+            f"(qSOFA `{qsofa} / 3`, composite {composite_str}).",
+            f"Rationale: {rationale}",
+        ]
+        if comorbid:
+            lines.append(
+                "Contributing conditions: "
+                + ", ".join(f"`{c}`" for c in comorbid[:5])
+            )
+        return "\n".join(lines)
+
+    async def _handle_check_sepsis(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> str:
+        """Run flag_sepsis_onset and format the CDC ASE evidence."""
+        try:
+            raw = await self._mcp.call_tool(
+                "flag_sepsis_onset",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't run the sepsis screen for `{patient_id}` "
+                f"because the MCP tool was unreachable: {e}."
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="check sepsis")
+        if err is not None:
+            return err
+
+        suspected = bool(data.get("sepsis_suspected"))
+        mode = data.get("mode", "cdc_ase")
+        criteria = data.get("criteria_met") or []
+        onset = data.get("onset_estimate")
+
+        if not suspected:
+            tail = (
+                f" Mode `{mode}`, no criteria met."
+                if not criteria
+                else f" Mode `{mode}`; partial criteria: "
+                + "; ".join(f"`{c}`" for c in criteria[:3])
+            )
+            return (
+                f"Sepsis screen for `{patient_id}`: not suspected."
+                + tail
+            )
+
+        header = (
+            f"Sepsis screen for `{patient_id}`: SUSPECTED "
+            f"(mode `{mode}`"
+            + (f", onset `{onset}`" if onset else "")
+            + ")."
+        )
+        bullets = [f"- {c}" for c in criteria[:5]]
+        return "\n".join([header, "Criteria met:", *bullets])
+
+    async def _handle_draft_sbar(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> str:
+        """Run all 3 screens + generate_escalation_note. Return SBAR text.
+
+        Does NOT enqueue to the review queue. The autonomous polling loop
+        keeps enqueuing; this request-response skill just returns prose,
+        because Prompt Opinion's general chat is the HITL surface in
+        Option 3.
+        """
+        # Run the three screens. Any tool error short-circuits to a
+        # one-line friendly response.
+        try:
+            screen_result = await self._mcp.call_tool(
+                "screen_vital_thresholds",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+            risk_result = await self._mcp.call_tool(
+                "score_deterioration_risk",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+            sepsis_result = await self._mcp.call_tool(
+                "flag_sepsis_onset",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't draft an SBAR for `{patient_id}` because "
+                f"a screening MCP tool was unreachable: {e}."
+            )
+
+        # Pick a recipient based on whether sepsis fires — same heuristic
+        # the autonomous loop has used since B7.
+        sepsis_triggered = (
+            _safe_get(sepsis_result, "sepsis_suspected") is True
+        )
+        recipient_role = (
+            "rapid_response" if sepsis_triggered else "charge_nurse"
+        )
+
+        try:
+            escalation_result = await self._mcp.call_tool(
+                "generate_escalation_note",
+                arguments={
+                    "patient_id": patient_id,
+                    "vitals_result": screen_result,
+                    "risk_result": risk_result,
+                    "sepsis_result": sepsis_result,
+                    "recipient_role": recipient_role,
+                },
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't draft an SBAR for `{patient_id}` because "
+                f"the escalation-note MCP tool failed: {e}."
+            )
+
+        data = _unwrap_tool_result(escalation_result)
+        err = _tool_error_text(data, patient_id, action="draft an SBAR")
+        if err is not None:
+            return err
+
+        narrative = (data.get("narrative") or "").strip()
+        severity = data.get("severity") or "info"
+        resolved_recipient = data.get("recipient_role") or recipient_role
+        model_used = data.get("model_used") or "unknown"
+
+        logger.info(
+            "SBAR drafted (no enqueue — Option 3 chat is HITL)",
+            extra={
+                "patient_id": patient_id,
+                "severity": severity,
+                "model_used": model_used,
+            },
+        )
+
+        header = (
+            f"SBAR for `{patient_id}` — severity `{severity}`, "
+            f"recipient `{resolved_recipient}` (model `{model_used}`)."
+        )
+        if narrative:
+            return f"{header}\n\n{narrative}"
+
+        # Fall back to assembling from the structured SBAR block if the
+        # narrative is empty.
+        sbar = data.get("sbar") or {}
+        block = "\n".join(
+            f"**{k.title()}:** {sbar.get(k, '').strip() or '—'}"
+            for k in ("situation", "background", "assessment", "recommendation")
+        )
+        return f"{header}\n\n{block}"
+
+    async def _handle_start_watching(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> str:
+        """Acknowledge — autonomous loop is started by app.py via env var.
+
+        This skill is informational/stub for the demo; programmatic loop
+        control is post-MVP. Returning a chat-friendly explanation lets
+        the launchpad surface the right answer rather than 404-ing.
+        """
+        return (
+            f"Vigil's autonomous polling loop is configured at the "
+            f"deployment level via the `POLL_INTERVAL_SEC` env var "
+            f"(set to `0` in Option 3 to disable). To enable continuous "
+            f"monitoring of `{patient_id}`, set a positive interval and "
+            f"restart the agent service. Programmatic per-patient control "
+            "is post-MVP."
         )
 
     # ---------------------------------------------------------------
@@ -349,6 +481,28 @@ class PostopSentinelExecutor(AgentExecutor):
             ),
         )
         await event_queue.enqueue_event(task)
+
+    async def _emit_completed(
+        self,
+        event_queue: EventQueue,
+        task_id: str,
+        context_id: str,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Emit a single final ``TaskState.completed`` event with chat text."""
+        await self._emit_status(
+            event_queue, task_id, context_id,
+            TaskState.completed,
+            text,
+            final=True,
+            metadata=metadata,
+        )
+
+
+# ---------------------------------------------------------------
+# Module-level helpers — kept for test compatibility.
+# ---------------------------------------------------------------
 
 
 def _safe_get(data: Any, key: str) -> Any:
@@ -394,3 +548,24 @@ def _unwrap_tool_result(data: Any) -> dict[str, Any]:
                 return parsed if isinstance(parsed, dict) else {}
         return data
     return {}
+
+
+def _tool_error_text(
+    data: dict[str, Any],
+    patient_id: str,
+    action: str,
+) -> str | None:
+    """Return a friendly error sentence iff ``data`` is a tool error envelope.
+
+    The 4 MCP tools share ``ToolStatus`` (``backend/schemas.py``); statuses
+    in :data:`_TOOL_ERROR_STATUSES` indicate a precondition failure rather
+    than a clinical signal. ``triggered`` is NOT an error.
+    """
+    status = data.get("status")
+    if isinstance(status, str) and status in _TOOL_ERROR_STATUSES:
+        message = data.get("message") or "the tool returned an error envelope"
+        return (
+            f"I couldn't {action} for `{patient_id}` because "
+            f"{message} (status `{status}`)."
+        )
+    return None

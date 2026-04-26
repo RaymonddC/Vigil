@@ -37,9 +37,17 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _make_fhir_context(fhir_base_url: str) -> FhirContext:
-    """Construct FhirContext from the server-side FHIR URL (no user input)."""
-    return FhirContext(url=fhir_base_url, token=None)
+def _make_fhir_context(
+    fhir_base_url: str, token: str | None = None
+) -> FhirContext:
+    """Construct FhirContext from the server-side FHIR URL.
+
+    ``token`` is forwarded as ``Authorization: Bearer …`` by ``FhirClient`` and
+    is only set when the request is overridden to a non-HAPI source (resolved
+    upstream by ``backend.api.main.resolve_fhir_source``). Default callers pass
+    no token (HAPI mode).
+    """
+    return FhirContext(url=fhir_base_url, token=token)
 
 
 # Display labels for the 4 recipient roles the SBAR can target.
@@ -190,9 +198,11 @@ def _derive_trajectory(conditions: list[Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def list_patients_action(fhir_base_url: str) -> dict[str, Any]:
+async def list_patients_action(
+    fhir_base_url: str, fhir_token: str | None = None
+) -> dict[str, Any]:
     """Return all patients with status summary. API_CONTRACTS.md §6.1"""
-    ctx = _make_fhir_context(fhir_base_url)
+    ctx = _make_fhir_context(fhir_base_url, token=fhir_token)
     async with FhirClient(ctx) as client:
         patients = await client.get_all_patients()
         condition_lists = await asyncio.gather(
@@ -241,10 +251,10 @@ VITAL_LABELS: dict[str, str] = {
 
 
 async def get_patient_detail_action(
-    patient_id: str, fhir_base_url: str
+    patient_id: str, fhir_base_url: str, fhir_token: str | None = None
 ) -> dict[str, Any]:
     """Full dashboard payload for patient detail page. API_CONTRACTS.md §6.2"""
-    ctx = _make_fhir_context(fhir_base_url)
+    ctx = _make_fhir_context(fhir_base_url, token=fhir_token)
     async with FhirClient(ctx) as client:
         patient, encounter, observations, conditions = await asyncio.gather(
             client.get_patient(patient_id),
@@ -365,6 +375,7 @@ async def approve_alert_action(
     alert_id: str,
     body: ApproveRequest,
     fhir_base_url: str,
+    fhir_token: str | None = None,
 ) -> ApproveResponse:
     """Clinician approval: writes Communication + AuditEvent to HAPI.
 
@@ -383,7 +394,7 @@ async def approve_alert_action(
             detail="Concurrent approve in progress or alert already approved",
         )
 
-    ctx = _make_fhir_context(fhir_base_url)
+    ctx = _make_fhir_context(fhir_base_url, token=fhir_token)
     now = datetime.now(UTC)
 
     # Build Communication with status flipped to completed

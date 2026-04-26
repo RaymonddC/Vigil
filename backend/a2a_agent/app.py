@@ -22,9 +22,10 @@ from typing import Any
 from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCard
 
+from backend.a2a_agent.agent_card_v1 import AgentCardV1
 from backend.a2a_agent.mcp_client import VigilMcpClient
+from backend.a2a_agent.po_compat import PoCompatMiddleware
 from backend.a2a_agent.sentinel import PostopSentinelExecutor
 from backend.a2a_agent.tick import run_cycle_for_all_patients
 from backend.obs.logging import configure_logging, get_logger
@@ -52,11 +53,17 @@ FHIR_BASE_URL = os.environ.get("FHIR_BASE_URL", "http://localhost:8080/fhir")
 _card_path = Path(__file__).parent / "agent_card.json"
 _card_data = json.loads(_card_path.read_text())
 
-# Override URL from env if deploying publicly
+# Override URL from env if deploying publicly. A2A v1 has both the legacy
+# top-level `url` (still required by the installed v0.3 SDK) and the canonical
+# `supportedInterfaces[].url`. Both must point at the public URL or Prompt
+# Opinion will read the latter and call back at localhost.
 if os.environ.get("A2A_PUBLIC_URL"):
-    _card_data["url"] = os.environ["A2A_PUBLIC_URL"]
+    _public_url = os.environ["A2A_PUBLIC_URL"]
+    _card_data["url"] = _public_url
+    for _iface in _card_data.get("supportedInterfaces", []):
+        _iface["url"] = _public_url
 
-agent_card = AgentCard.model_validate(_card_data)
+agent_card = AgentCardV1.model_validate(_card_data)
 
 # ---------------------------------------------------------------------------
 # Wire up executor → handler → application
@@ -75,7 +82,15 @@ app_builder = A2AFastAPIApplication(
     http_handler=request_handler,
 )
 
-app = app_builder.build()
+app = app_builder.build(rpc_url="/a2a")
+
+# Prompt Opinion ships gRPC-flavor JSON-RPC (PascalCase methods, ROLE_USER
+# enums) on POST /a2a — normalise to spec form so the a2a-sdk handler
+# dispatches correctly. Registered BEFORE the API-key middleware so that
+# api-key (last added → outermost in Starlette's stack) runs first and
+# rejects unauth'd requests cheaply, then PoCompat rewrites the body, then
+# the SDK dispatches.
+app.add_middleware(PoCompatMiddleware)
 
 # SEC-05: API key enforcement — exempt AgentCard (public per A2A spec) (H1).
 _A2A_SKIP_PREFIXES = ("/.well-known/agent-card.json", "/docs", "/openapi.json", "/redoc")

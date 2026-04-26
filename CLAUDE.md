@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project context
 
-Vigil is the submission for the **Agents Assemble — Healthcare AI Endgame** hackathon (Devpost, deadline 2026-05-11, Option B). It publishes to the Prompt Opinion Marketplace as both an MCP server (Path A) and an A2A agent (Path B). The demo narrative lives in `docs/DEMO_SCRIPT.md`; when in conflict, `docs/PROJECT_BRIEF.md` wins.
+Vigil is the submission for the **Agents Assemble — Healthcare AI Endgame** hackathon (Devpost, deadline 2026-05-11). It registers on the Prompt Opinion Marketplace as **Path B, Option 3 — Independent A2A Agent**: a public, externally hosted A2A agent that any A2A-aware system on the platform can consult. The demo narrative lives in `docs/DEMO_SCRIPT.md`; when in conflict, `docs/PROJECT_BRIEF.md` wins.
+
+Vigil ships two surfaces on the same backend. The **A2A agent** in `backend/a2a_agent/` (plus the MCP tools it calls in `backend/mcp_server/`) is the hackathon submission — it's what Prompt Opinion's launchpad chat invokes per patient. The **clinician dashboard** in `frontend/` is a custom client built on top of the same backend; it demonstrates a production-deployed UX for the same agent and serves as a portfolio surface beyond what the marketplace launchpad offers. Same code, same rule engine, same FHIR client — two front doors. When editing, preserve this invariant: anything the dashboard does must remain expressible as a call into the A2A agent or the MCP tools, not as dashboard-only logic.
 
 ## Commands
 
@@ -49,10 +51,10 @@ uv run pytest tests/integration/ -v      # one directory
 
 The backend ships as a single `vigil-backend` Docker image that dispatches on the `SERVICE` env var (see the `CMD` in `Dockerfile`):
 
-- `SERVICE=mcp` → `backend.mcp_server.server:app` on `:7001` — FastMCP streamable-HTTP server exposing the 4 clinical tools
-- `SERVICE=a2a` → `backend.a2a_agent.app:app` on `:9000` — A2A JSON-RPC agent with AgentCard at `/.well-known/agent-card.json`
-- `SERVICE=api` → `backend.api.main:app` on `:8000` — FastAPI proxy for the frontend (FHIR reads + clinician approve)
-- `SERVICE=fixture` → `backend.fhir_fixture.main:app` on `:8080` — synthetic-FHIR fallback, not used in the canonical demo path
+- `SERVICE=a2a` → `backend.a2a_agent.app:app` on `:9000` — **the public hackathon submission.** A2A JSON-RPC agent with AgentCard at `/.well-known/agent-card.json`. Prompt Opinion's launchpad and any other A2A client call this directly.
+- `SERVICE=mcp` → `backend.mcp_server.server:app` on `:7001` — FastMCP streamable-HTTP server exposing the 4 clinical tools. Called *internally* by the A2A agent; not surfaced for direct chat use in the Option 3 deployment.
+- `SERVICE=api` → `backend.api.main:app` on `:8000` — FastAPI proxy for the dashboard (FHIR reads + clinician approve). Powers the **portfolio surface** (`frontend/`); not part of the marketplace submission's request path.
+- `SERVICE=fixture` → `backend.fhir_fixture.main:app` on `:8080` — synthetic-FHIR fallback, not used in the canonical demo path.
 
 `docker-compose.yml` starts four copies of this image plus HAPI + Postgres + Caddy. The image requires `README.md` in the build context — `uv run` at container start re-validates the workspace via hatchling, which opens the readme listed in `pyproject.toml`.
 

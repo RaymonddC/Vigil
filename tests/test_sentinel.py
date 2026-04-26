@@ -1,68 +1,25 @@
-"""Tests for PostopSentinelExecutor — A2A agent state machine.
+"""Tests for the A2A executor's helper utilities and Option-3 contract.
 
-Covers FIX 1 (C1): the AWAITING_REVIEW state must persist the SBAR draft to
-the SQLite review queue via ``enqueue_alert`` so ``/api/alerts`` and
-``/api/patients/{id}/alerts/latest`` have something to return.
+Slice A re-targets the A2A executor at request-response skill dispatch.
+The historical "always enqueue on trigger" coverage that lived in this
+file has moved to ``tests/test_a2a_skill_dispatch.py`` because the
+queue-write side effect now belongs only to the autonomous tick path
+(``backend/a2a_agent/tick.py``) — see ``run_cycle_for_patient`` and its
+own coverage in ``tests/test_tick.py``.
+
+What remains here:
+  - shape coverage for ``_unwrap_tool_result`` (used by both paths)
+  - a guard that the A2A executor module itself does NOT depend on
+    the review-queue write path. If someone re-wires it, this test
+    will catch the regression.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-from backend.a2a_agent.sentinel import (
-    PostopSentinelExecutor,
-    _unwrap_tool_result,
-)
-
-PATIENT_ID = "PT-009"
-FHIR_URL = "http://localhost:8080/fhir"
-
-
-def _fhir_metadata() -> dict:
-    return {
-        "fhir-context": {
-            "fhirUrl": FHIR_URL,
-            "fhirToken": None,
-            "patientId": PATIENT_ID,
-        }
-    }
-
-
-def _mcp_text_result(payload: dict) -> dict:
-    """Wrap a payload as an MCP tools/call result (content[0].text)."""
-    return {
-        "content": [{"type": "text", "text": json.dumps(payload)}],
-        "isError": False,
-    }
-
-
-def _escalation_payload() -> dict:
-    return {
-        "status": "ok",
-        "patient_id": PATIENT_ID,
-        "sbar": {
-            "situation": "Postop sepsis suspected.",
-            "background": "C-section day 1, chorioamnionitis.",
-            "assessment": "qSOFA=2, lactate 4.2, SBP 84.",
-            "recommendation": "Activate rapid response.",
-        },
-        "narrative": "S: ... B: ... A: ... R: ...",
-        "severity": "critical",
-        "recipient_role": "rapid_response",
-        "communication_draft": {
-            "resourceType": "Communication",
-            "status": "in-progress",
-            "priority": "urgent",
-            "subject": {"reference": f"Patient/{PATIENT_ID}"},
-        },
-        "generated_at": datetime.now(UTC).isoformat(),
-        "model_used": "stub/test",
-    }
-
+from backend.a2a_agent import sentinel
+from backend.a2a_agent.sentinel import _unwrap_tool_result
 
 # ---------------------------------------------------------------------------
 # _unwrap_tool_result: shape coverage
@@ -71,7 +28,12 @@ def _escalation_payload() -> dict:
 
 class TestUnwrapToolResult:
     def test_mcp_content_wrapped(self) -> None:
-        wrapped = _mcp_text_result({"severity": "critical"})
+        wrapped = {
+            "content": [
+                {"type": "text", "text": json.dumps({"severity": "critical"})}
+            ],
+            "isError": False,
+        }
         assert _unwrap_tool_result(wrapped) == {"severity": "critical"}
 
     def test_plain_dict_passthrough(self) -> None:
@@ -87,147 +49,22 @@ class TestUnwrapToolResult:
 
 
 # ---------------------------------------------------------------------------
-# Execute: triggered path enqueues an alert
+# Option-3 invariant: the A2A executor must not enqueue.
 # ---------------------------------------------------------------------------
 
 
-class TestSentinelExecute:
-    @pytest.mark.asyncio
-    async def test_escalation_enqueues_alert(self, monkeypatch) -> None:
-        """When screening triggers, AWAITING_REVIEW must persist to SQLite."""
-        mcp = MagicMock()
-        mcp.call_tool = AsyncMock(
-            side_effect=[
-                _mcp_text_result(
-                    {
-                        "status": "triggered",
-                        "patient_id": PATIENT_ID,
-                        "breaches": [{"severity": "red"}],
-                    }
-                ),
-                _mcp_text_result(
-                    {
-                        "status": "triggered",
-                        "patient_id": PATIENT_ID,
-                        "risk_band": "high",
-                        "qsofa_score": 2,
-                    }
-                ),
-                _mcp_text_result(
-                    {
-                        "status": "triggered",
-                        "patient_id": PATIENT_ID,
-                        "sepsis_suspected": True,
-                        "mode": "cdc_ase",
-                    }
-                ),
-                _mcp_text_result(_escalation_payload()),
-            ]
+class TestNoQueueWriteFromExecutor:
+    """Slice A locks in: ``vigil.draft_sbar`` returns the SBAR text and
+    completes the A2A task; it does NOT enqueue to the SQLite review
+    queue. Prompt Opinion's general chat is the human-in-the-loop in
+    Option 3. The autonomous loop (``backend/a2a_agent/tick.py``) keeps
+    the enqueue side effect for the dashboard surface.
+    """
+
+    def test_sentinel_module_does_not_import_enqueue_alert(self) -> None:
+        # Direct symbol check — quick regression guard if someone
+        # accidentally re-wires the queue write into the executor.
+        assert not hasattr(sentinel, "enqueue_alert"), (
+            "PostopSentinelExecutor must not import enqueue_alert; "
+            "queue writes belong to backend/a2a_agent/tick.py."
         )
-
-        captured: dict = {}
-
-        def fake_enqueue(
-            patient_id,
-            severity,
-            sbar,
-            narrative,
-            recipient_role,
-            model_used,
-            communication_draft,
-        ):
-            captured.update(
-                patient_id=patient_id,
-                severity=severity,
-                sbar=sbar,
-                narrative=narrative,
-                recipient_role=recipient_role,
-                model_used=model_used,
-                communication_draft=communication_draft,
-            )
-            return "alert-abc12345"
-
-        monkeypatch.setattr(
-            "backend.a2a_agent.sentinel.enqueue_alert", fake_enqueue
-        )
-
-        executor = PostopSentinelExecutor(mcp=mcp)
-
-        # Minimal RequestContext + EventQueue stand-ins
-        ctx = MagicMock()
-        ctx.task_id = "task-1"
-        ctx.context_id = "ctx-1"
-        ctx.message = MagicMock()
-        ctx.message.metadata = _fhir_metadata()
-
-        event_queue = MagicMock()
-        event_queue.enqueue_event = AsyncMock()
-
-        await executor.execute(ctx, event_queue)
-
-        # enqueue_alert was called with the fields from the escalation payload
-        assert captured["patient_id"] == PATIENT_ID
-        assert captured["severity"] == "critical"
-        assert captured["recipient_role"] == "rapid_response"
-        assert captured["model_used"] == "stub/test"
-        assert captured["sbar"]["situation"] == "Postop sepsis suspected."
-        assert captured["communication_draft"]["resourceType"] == "Communication"
-
-        # Final event carries alert_id in message metadata
-        final_call = event_queue.enqueue_event.call_args_list[-1]
-        task = final_call.args[0]
-        assert task.status.message.metadata["alert_id"] == "alert-abc12345"
-        assert task.status.message.metadata["severity"] == "critical"
-
-    @pytest.mark.asyncio
-    async def test_normal_path_does_not_enqueue(self, monkeypatch) -> None:
-        """If nothing triggers, enqueue_alert must not be called."""
-        mcp = MagicMock()
-        mcp.call_tool = AsyncMock(
-            side_effect=[
-                _mcp_text_result(
-                    {"status": "ok", "patient_id": PATIENT_ID, "breaches": []}
-                ),
-                _mcp_text_result(
-                    {
-                        "status": "ok",
-                        "patient_id": PATIENT_ID,
-                        "risk_band": "low",
-                        "qsofa_score": 0,
-                    }
-                ),
-                _mcp_text_result(
-                    {
-                        "status": "ok",
-                        "patient_id": PATIENT_ID,
-                        "sepsis_suspected": False,
-                        "mode": "cdc_ase",
-                    }
-                ),
-            ]
-        )
-
-        called = False
-
-        def fake_enqueue(*args, **kwargs):
-            nonlocal called
-            called = True
-            return "alert-should-not-happen"
-
-        monkeypatch.setattr(
-            "backend.a2a_agent.sentinel.enqueue_alert", fake_enqueue
-        )
-
-        executor = PostopSentinelExecutor(mcp=mcp)
-        ctx = MagicMock()
-        ctx.task_id = "task-2"
-        ctx.context_id = "ctx-2"
-        ctx.message = MagicMock()
-        ctx.message.metadata = _fhir_metadata()
-        event_queue = MagicMock()
-        event_queue.enqueue_event = AsyncMock()
-
-        await executor.execute(ctx, event_queue)
-        assert called is False
-        # only 3 MCP calls (no escalation)
-        assert mcp.call_tool.await_count == 3

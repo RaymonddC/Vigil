@@ -38,10 +38,19 @@ class VigilMcpClient:
     """
 
     def __init__(self, base_url: str | None = None) -> None:
+        """Initialize the MCP client.
+
+        If ``VIGIL_API_KEY`` is set in the environment, it will be forwarded
+        as ``X-API-Key`` on every tool call so the MCP server's SEC-05
+        middleware accepts the request. Captured once at construction; if
+        unset, no header is injected (matches the middleware's dev-mode
+        warn-and-allow behavior).
+        """
         self._base_url = (
             base_url
             or os.environ.get("VIGIL_MCP_URL", DEFAULT_MCP_URL)
         ).rstrip("/")
+        self._api_key = os.environ.get("VIGIL_API_KEY")
 
     async def call_tool(
         self,
@@ -69,6 +78,10 @@ class VigilMcpClient:
         }
         if sharp_headers:
             headers.update(sharp_headers)
+        # Inject the API key last so a malformed sharp_headers payload
+        # cannot clobber our SEC-05 credential.
+        if self._api_key:
+            headers["X-API-Key"] = self._api_key
 
         # MCP streamable HTTP uses JSON-RPC
         payload = {

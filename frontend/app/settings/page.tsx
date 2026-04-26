@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Panel } from "@/components/panel";
+import { FhirSourceSwitcher } from "@/components/fhir-source-switcher";
 import { getStatus, type StatusResponse } from "@/lib/api";
 
 export const metadata: Metadata = {
@@ -52,6 +53,8 @@ export default async function SettingsPage() {
 
       {!error && status && (
         <div className="settings-grid">
+          <FhirSourceSwitcher />
+
           <Panel title="LLM provider" bodyClassName="">
             <div>
               <Row k="Provider" v={status.llm_provider} />
@@ -68,9 +71,27 @@ export default async function SettingsPage() {
             </div>
           </Panel>
 
-          <Panel title="FHIR gateway" bodyClassName="">
+          <Panel
+            title={
+              <span className="inline-flex items-center gap-2">
+                FHIR gateway
+                {status.fhir_source && (
+                  <span
+                    className="text-[10px] uppercase tracking-wider rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[var(--fg-3)]"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
+                    {status.fhir_source}
+                  </span>
+                )}
+              </span>
+            }
+            bodyClassName=""
+          >
             <div>
-              <Row k="Endpoint" v={status.fhir_url} />
+              <Row
+                k="Endpoint"
+                v={status.fhir_url_label ?? status.fhir_url}
+              />
               <Row k="Version" v="R4" />
               {status.fhir_error && <Row k="Error" v={status.fhir_error} />}
               <StatusRow

@@ -127,6 +127,9 @@ export const StatusResponseSchema = z.object({
   a2a_agent_url: z.string(),
   token_usage: z.record(z.string(), z.number()).optional(),
   ts: z.string(),
+  // FHIR-source toggle (added in slice A/B). Optional for backwards-compat.
+  fhir_source: z.string().optional(),
+  fhir_url_label: z.string().optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -138,17 +141,63 @@ export type StatusResponse = z.infer<typeof StatusResponseSchema>;
  * Build headers for server-side fetches. Injects X-API-Key from env so RSC
  * requests pass the FastAPI proxy's API key middleware (SEC-05). Never runs
  * in browser code — SERVER_BASE is only reachable from the server.
+ *
+ * Async because we read the FHIR-source cookies via `next/headers` cookies()
+ * (which itself returns a promise in Next.js 15+). The token is intentionally
+ * never readable from the server — RSC can't see localStorage, so client-side
+ * fetches handle the token via `buildClientHeaders()` instead.
  */
-function buildServerHeaders(): HeadersInit {
+async function buildServerHeaders(): Promise<HeadersInit> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const apiKey = process.env.VIGIL_API_KEY;
   if (apiKey) headers["X-API-Key"] = apiKey;
+
+  try {
+    const { cookies } = await import("next/headers");
+    const jar = await cookies();
+    const source = jar.get("vigil_fhir_source")?.value;
+    const url = jar.get("vigil_fhir_url")?.value;
+    if (source) headers["X-Vigil-Fhir-Source"] = source;
+    if (source && source !== "hapi" && url) {
+      headers["X-Vigil-Fhir-Url"] = url;
+    }
+  } catch {
+    // Outside an RSC request context (e.g. unit test) — skip cookie hop.
+  }
+  return headers;
+}
+
+/**
+ * Build headers for client-side fetches that go through the same-origin
+ * Next.js proxy. Reads the FHIR-source selection from localStorage via
+ * dynamic import (mirrors the clinicians dynamic-import pattern in
+ * `ackAlert`) so the server bundle never pulls localStorage code.
+ *
+ * The bearer token is injected here and only here — the proxy then forwards
+ * it to the FastAPI backend; redaction lives in `app/api/[...path]/route.ts`
+ * via the REDACT_KEYS allowlist.
+ */
+async function buildClientHeaders(
+  extra?: Record<string, string>
+): Promise<HeadersInit> {
+  const headers: Record<string, string> = { ...(extra ?? {}) };
+  try {
+    const { getFhirHeaderValues } = await import("./fhir-sources");
+    const { source, url, token } = getFhirHeaderValues();
+    headers["X-Vigil-Fhir-Source"] = source;
+    if (source !== "hapi") {
+      if (url) headers["X-Vigil-Fhir-Url"] = url;
+      if (token) headers["X-Vigil-Fhir-Token"] = token;
+    }
+  } catch {
+    // Module not yet available (e.g. SSR'd test env); skip.
+  }
   return headers;
 }
 
 export async function getPatients(): Promise<PatientsResponse> {
   const res = await fetch(`${SERVER_BASE}/api/patients`, {
-    headers: buildServerHeaders(),
+    headers: await buildServerHeaders(),
     next: { revalidate: 10 },
   });
   if (!res.ok) throw new Error("patients fetch failed");
@@ -158,7 +207,7 @@ export async function getPatients(): Promise<PatientsResponse> {
 
 export async function getPatient(id: string): Promise<PatientDetail> {
   const res = await fetch(`${SERVER_BASE}/api/patients/${id}`, {
-    headers: buildServerHeaders(),
+    headers: await buildServerHeaders(),
     next: { revalidate: 10 },
   });
   if (!res.ok) throw new Error(`patient ${id} fetch failed`);
@@ -168,7 +217,7 @@ export async function getPatient(id: string): Promise<PatientDetail> {
 
 export async function getLatestAlert(pid: string): Promise<LatestAlert> {
   const res = await fetch(`${SERVER_BASE}/api/patients/${pid}/alerts/latest`, {
-    headers: buildServerHeaders(),
+    headers: await buildServerHeaders(),
     next: { revalidate: 5 },
   });
   if (!res.ok) throw new Error(`latest alert for ${pid} fetch failed`);
@@ -182,7 +231,7 @@ export async function getAlert(
 ): Promise<LatestAlert> {
   const res = await fetch(
     `${SERVER_BASE}/api/patients/${pid}/alerts/${aid}`,
-    { headers: buildServerHeaders(), next: { revalidate: 10 } }
+    { headers: await buildServerHeaders(), next: { revalidate: 10 } }
   );
   if (!res.ok) throw new Error(`alert ${aid} fetch failed`);
   const data = await res.json();
@@ -191,7 +240,7 @@ export async function getAlert(
 
 export async function getStatus(): Promise<StatusResponse> {
   const res = await fetch(`${SERVER_BASE}/api/status`, {
-    headers: buildServerHeaders(),
+    headers: await buildServerHeaders(),
     next: { revalidate: 30 },
   });
   if (!res.ok) throw new Error("status fetch failed");
@@ -204,7 +253,7 @@ export async function getEvents(since?: string) {
     ? `${SERVER_BASE}/api/events/tail?since=${encodeURIComponent(since)}`
     : `${SERVER_BASE}/api/events/tail`;
   const res = await fetch(url, {
-    headers: buildServerHeaders(),
+    headers: await buildServerHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw new Error("events fetch failed");
@@ -223,9 +272,10 @@ export async function ackAlert(
   // Dynamic import keeps the client-only localStorage code out of any server
   // bundle that happens to pull in this module transitively.
   const { getSelectedClinicianId } = await import("./clinicians");
+  const headers = await buildClientHeaders({ "Content-Type": "application/json" });
   const res = await fetch(`/api/patients/${pid}/alerts/${aid}/approve`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       clinician_id: getSelectedClinicianId(),
       note: "Acknowledged, RRT dispatched.",
@@ -249,7 +299,10 @@ export async function ackAlert(
 }
 
 export async function triggerAgentTick() {
-  const res = await fetch("/api/agent/tick", { method: "POST" });
+  const res = await fetch("/api/agent/tick", {
+    method: "POST",
+    headers: await buildClientHeaders(),
+  });
   if (!res.ok) throw new Error("agent tick failed");
   return res.json();
 }
@@ -309,7 +362,10 @@ export async function fetchEvents(
   const url = since
     ? `/api/events/tail?since=${encodeURIComponent(since)}`
     : "/api/events/tail";
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: await buildClientHeaders(),
+  });
   if (!res.ok) throw new Error("events fetch failed");
   const data = await res.json();
   return EventsTailResponseSchema.parse(data);
@@ -317,7 +373,10 @@ export async function fetchEvents(
 
 /** Client-side: fetch pending alert queue (Alerts, FE4) */
 export async function fetchAlerts(): Promise<{ alerts: QueueAlert[] }> {
-  const res = await fetch("/api/alerts", { cache: "no-store" });
+  const res = await fetch("/api/alerts", {
+    cache: "no-store",
+    headers: await buildClientHeaders(),
+  });
   if (!res.ok) throw new Error("alerts fetch failed");
   const data = await res.json();
   return AlertsResponseSchema.parse(data);

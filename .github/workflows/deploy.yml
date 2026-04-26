@@ -39,7 +39,7 @@ jobs:
             echo "::endgroup::"
           ENDSSH
 
-      - name: Healthcheck
+      - name: Healthcheck — dashboard /api/health
         run: |
           # Probe against SITE_DOMAIN (not EC2_HOST) — Caddy's Let's Encrypt
           # cert is issued for the public hostname, so HTTPS requests to the
@@ -61,10 +61,57 @@ jobs:
             code=$(curl -sS -L -o /dev/null -w "%{http_code}" -m 10 "${URL}" || echo "000")
             echo "  attempt ${attempt}/12 → ${code}"
             if [[ "${code}" == "200" ]]; then
-              echo "::notice::Deploy healthy after ${attempt} attempt(s)."
-              exit 0
+              echo "::notice::Dashboard healthy after ${attempt} attempt(s)."
+              break
+            fi
+            if [[ "${attempt}" == "12" ]]; then
+              echo "::error::/api/health never returned 200 within 60 s. Last code: ${code}."
+              exit 1
             fi
             sleep 5
           done
-          echo "::error::/api/health never returned 200 within 60 s. Last code: ${code}."
+
+      - name: Healthcheck — A2A AgentCard
+        run: |
+          # The hackathon submission surface (Option 3). Without this probe,
+          # a broken AgentCard would ship silently — Prompt Opinion's
+          # `Add Connection → Check` fetches this URL and parses the JSON.
+          #
+          # Path: the A2A spec mandates the card at the root well-known path,
+          # which Caddy routes via `handle /.well-known/agent-card.json`.
+          # The /a2a JSON-RPC mount is a separate concern (refactor pending).
+          #
+          # We require both 200 and a non-empty JSON body containing the
+          # agent's declared name — empty 200s and HTML error pages have
+          # both happened before.
+          set -e
+          DOMAIN="${{ secrets.SITE_DOMAIN }}"
+          if [[ -z "${DOMAIN}" ]]; then
+            echo "::error::SITE_DOMAIN secret is not set."
+            exit 1
+          fi
+          URL="https://${DOMAIN}/.well-known/agent-card.json"
+          echo "Probing ${URL}"
+          BODY_FILE="$(mktemp)"
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -L -o "${BODY_FILE}" -w "%{http_code}" -m 10 "${URL}" || echo "000")
+            echo "  attempt ${attempt}/12 → ${code}"
+            if [[ "${code}" == "200" ]]; then
+              # Non-empty + valid JSON + has a "name" field
+              if jq -e '.name | type == "string" and length > 0' "${BODY_FILE}" >/dev/null 2>&1; then
+                NAME=$(jq -r '.name' "${BODY_FILE}")
+                echo "::notice::AgentCard healthy after ${attempt} attempt(s) — name='${NAME}'."
+                rm -f "${BODY_FILE}"
+                exit 0
+              else
+                echo "  → 200 but body is not a valid AgentCard JSON; retrying"
+              fi
+            fi
+            sleep 5
+          done
+          echo "::error::AgentCard probe failed within 60 s. Last code: ${code}."
+          echo "::group::Last response body"
+          cat "${BODY_FILE}" || true
+          echo "::endgroup::"
+          rm -f "${BODY_FILE}"
           exit 1

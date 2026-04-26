@@ -1,58 +1,82 @@
 {
-  "name": "Vigil Postop Sentinel",
-  "description": "Continuously monitors postop and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs, then drafts SBAR escalation notes for the clinical team.",
-  "version": "0.1.0",
+  "name": "Vigil — Postop & Postpartum Sentinel",
+  "description": "Continuously monitors postoperative and postpartum patients for deterioration. Runs MEWT, qSOFA, and CDC ASE screens against FHIR vitals and labs. Drafts SBAR escalation notes for clinician review.",
+  "version": "1.0.0",
   "url": "http://localhost:9000/a2a",
-  "preferredTransport": "JSONRPC",
-  "protocolVersion": "0.2",
   "provider": {
     "organization": "Team Vigil (Agents Assemble 2026)",
     "url": "https://github.com/raymond/vigil"
   },
   "documentationUrl": "https://github.com/raymond/vigil/blob/main/docs/API_CONTRACTS.md",
-  "defaultInputModes": ["application/json", "text/plain"],
-  "defaultOutputModes": ["application/json", "text/plain"],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
   "capabilities": {
-    "streaming": true,
+    "streaming": false,
     "pushNotifications": false,
     "stateTransitionHistory": false,
     "extensions": [
       {
-        "uri": "ai.promptopinion/fhir-context",
-        "description": "Accepts FHIR server URL, bearer token, and patient id via A2A message metadata under the key matching 'fhir-context'.",
-        "required": true,
+        "uri": "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context",
+        "description": "FHIR context allowing the agent to query a FHIR server securely. Vigil reads the context from A2A message metadata under any key containing the substring 'fhir-context' and translates {fhirUrl, fhirToken, patientId} into the three SHARP HTTP headers (x-fhir-server-url, x-fhir-access-token, x-patient-id) when calling its MCP tools.",
+        "required": false,
         "params": {
-          "metadata_key_suffix": "fhir-context",
-          "fields": ["fhirUrl", "fhirToken", "patientId"]
+          "scopes": [
+            { "name": "patient/Patient.rs", "required": true },
+            { "name": "patient/Observation.rs", "required": true },
+            { "name": "patient/Condition.rs", "required": true },
+            { "name": "patient/MedicationRequest.rs" }
+          ]
         }
       }
     ]
   },
+  "supportedInterfaces": [
+    {
+      "url": "http://localhost:9000/a2a",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
   "skills": [
     {
-      "id": "vigil.monitor_patient",
-      "name": "Monitor patient for deterioration",
-      "description": "End-to-end screen: pulls recent vitals and labs, runs MEWT + qSOFA + CDC ASE, and returns a structured alert with an SBAR note when any trigger fires.",
-      "tags": ["healthcare", "postop", "postpartum", "sepsis", "early-warning"],
-      "examples": [
-        "Check patient-42 for signs of deterioration in the last 4 hours.",
-        "Screen this postpartum patient for preeclampsia red flags and sepsis."
-      ],
-      "inputModes": ["application/json", "text/plain"],
-      "outputModes": ["application/json", "text/plain"]
+      "id": "vigil.screen_vitals",
+      "name": "Screen vitals for early-warning thresholds",
+      "description": "Runs MEWT against the patient's most recent vitals. Returns triggered/not, breach list with severity, narrative summary.",
+      "tags": ["screen", "vitals", "mewt"]
     },
     {
-      "id": "vigil.explain_alert",
-      "name": "Explain an existing alert",
-      "description": "Given a prior alert id, returns the evidence trail (which vitals, which criteria, which LLM rationale).",
-      "tags": ["healthcare", "explainability"],
-      "examples": ["Why did you escalate patient-42 at 12:01?"],
-      "inputModes": ["application/json", "text/plain"],
-      "outputModes": ["application/json", "text/plain"]
+      "id": "vigil.score_risk",
+      "name": "Score deterioration risk",
+      "description": "Computes qSOFA and a composite deterioration band (low/moderate/high). Returns score, rationale, and contributing signals.",
+      "tags": ["risk", "qsofa", "news2"]
+    },
+    {
+      "id": "vigil.check_sepsis",
+      "name": "Check for sepsis onset",
+      "description": "Applies CDC Adult Sepsis Event criteria (SIRS + infection + organ dysfunction). Returns suspicion verdict with cited evidence.",
+      "tags": ["sepsis", "ase", "infection"]
+    },
+    {
+      "id": "vigil.draft_sbar",
+      "name": "Draft SBAR escalation note",
+      "description": "Combines all three screens with the LLM-drafted Situation/Background/Assessment/Recommendation handoff. Returns the prose for clinician review.",
+      "tags": ["sbar", "escalate", "handoff"]
+    },
+    {
+      "id": "vigil.start_watching",
+      "name": "Start autonomous watching",
+      "description": "Begins background monitoring for the named patient. Optional. Demo-only.",
+      "tags": ["watch", "monitor"]
     }
   ],
   "securitySchemes": {
-    "apiKey": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+    "apiKey": {
+      "apiKeySecurityScheme": {
+        "name": "X-API-Key",
+        "location": "header",
+        "description": "API key required to access this agent."
+      }
+    }
   },
   "security": [{ "apiKey": [] }]
 }

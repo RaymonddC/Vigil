@@ -40,12 +40,27 @@ function buildUpstreamUrl(path: string[], searchParams: URLSearchParams): string
   return `${BACKEND_URL}${apiPath}${qs ? `?${qs}` : ""}`;
 }
 
-function buildHeaders(): HeadersInit {
+/**
+ * Headers we forward verbatim from inbound to backend. Lower-case so that
+ * the case-insensitive `Headers.get(...)` lookup matches regardless of how
+ * the browser/RSC transport casing them.
+ */
+const FORWARD_HEADERS = [
+  "x-vigil-fhir-source",
+  "x-vigil-fhir-url",
+  "x-vigil-fhir-token",
+] as const;
+
+function buildHeaders(req: NextRequest): HeadersInit {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (VIGIL_API_KEY) {
     headers["X-API-Key"] = VIGIL_API_KEY;
+  }
+  for (const name of FORWARD_HEADERS) {
+    const v = req.headers.get(name);
+    if (v) headers[name] = v;
   }
   return headers;
 }
@@ -65,6 +80,7 @@ function sanitizeForLog(data: unknown): unknown {
     "token", "access_token", "fhir_token",
     "authorization", "secret", "password",
     "x-api-key", "x-fhir-access-token",
+    "x-vigil-fhir-token",
   ]);
 
   for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
@@ -128,7 +144,7 @@ async function proxyRequest(
   try {
     const fetchInit: RequestInit = {
       method: req.method,
-      headers: buildHeaders(),
+      headers: buildHeaders(req),
     };
 
     // Forward body for POST/PUT/PATCH
