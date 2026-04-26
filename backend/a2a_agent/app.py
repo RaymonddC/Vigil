@@ -25,6 +25,7 @@ from a2a.server.tasks import InMemoryTaskStore
 
 from backend.a2a_agent.agent_card_v1 import AgentCardV1
 from backend.a2a_agent.mcp_client import VigilMcpClient
+from backend.a2a_agent.po_compat import PoCompatMiddleware
 from backend.a2a_agent.sentinel import PostopSentinelExecutor
 from backend.a2a_agent.tick import run_cycle_for_all_patients
 from backend.obs.logging import configure_logging, get_logger
@@ -82,6 +83,14 @@ app_builder = A2AFastAPIApplication(
 )
 
 app = app_builder.build(rpc_url="/a2a")
+
+# Prompt Opinion ships gRPC-flavor JSON-RPC (PascalCase methods, ROLE_USER
+# enums) on POST /a2a — normalise to spec form so the a2a-sdk handler
+# dispatches correctly. Registered BEFORE the API-key middleware so that
+# api-key (last added → outermost in Starlette's stack) runs first and
+# rejects unauth'd requests cheaply, then PoCompat rewrites the body, then
+# the SDK dispatches.
+app.add_middleware(PoCompatMiddleware)
 
 # SEC-05: API key enforcement — exempt AgentCard (public per A2A spec) (H1).
 _A2A_SKIP_PREFIXES = ("/.well-known/agent-card.json", "/docs", "/openapi.json", "/redoc")
