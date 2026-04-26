@@ -35,6 +35,11 @@ from backend.a2a_agent.po_compat import (
 # ---------------------------------------------------------------------------
 
 
+def _rewrite(method: str) -> str:
+    body = {"jsonrpc": "2.0", "id": "1", "method": method, "params": {}}
+    return normalise_po_payload(body)["method"]
+
+
 class TestMethodAliases:
     """Each of the 11 PO PascalCase methods → JSON-RPC slash form.
 
@@ -42,66 +47,25 @@ class TestMethodAliases:
     https://raw.githubusercontent.com/a2aproject/A2A/main/specification/a2a.proto
     """
 
-    def _rewrite(self, method: str) -> str:
-        body = {"jsonrpc": "2.0", "id": "1", "method": method, "params": {}}
-        return normalise_po_payload(body)["method"]
-
-    def test_send_message_alias(self) -> None:
-        assert self._rewrite("SendMessage") == "message/send"
-
-    def test_send_streaming_message_alias(self) -> None:
-        assert self._rewrite("SendStreamingMessage") == "message/stream"
-
-    def test_get_task_alias(self) -> None:
-        assert self._rewrite("GetTask") == "tasks/get"
-
-    def test_list_tasks_alias(self) -> None:
-        assert self._rewrite("ListTasks") == "tasks/list"
-
-    def test_cancel_task_alias(self) -> None:
-        assert self._rewrite("CancelTask") == "tasks/cancel"
-
-    def test_subscribe_to_task_alias(self) -> None:
-        assert self._rewrite("SubscribeToTask") == "tasks/resubscribe"
-
-    def test_create_push_notification_config_alias(self) -> None:
-        assert (
-            self._rewrite("CreateTaskPushNotificationConfig")
-            == "tasks/pushNotificationConfig/set"
-        )
-
-    def test_get_push_notification_config_alias(self) -> None:
-        assert (
-            self._rewrite("GetTaskPushNotificationConfig")
-            == "tasks/pushNotificationConfig/get"
-        )
-
-    def test_list_push_notification_configs_alias(self) -> None:
-        """Note the PLURAL ``Configs`` — easy to typo as singular."""
-        assert (
-            self._rewrite("ListTaskPushNotificationConfigs")
-            == "tasks/pushNotificationConfig/list"
-        )
+    @pytest.mark.parametrize(
+        "grpc_name,jsonrpc_name",
+        list(PO_METHOD_ALIASES.items()),
+        ids=list(PO_METHOD_ALIASES.keys()),
+    )
+    def test_alias_rewrites_to_spec_form(
+        self, grpc_name: str, jsonrpc_name: str
+    ) -> None:
+        """Auto-grows: every entry in PO_METHOD_ALIASES is checked. When
+        we add a new alias, this test parametrize gains a new case for
+        free — no manual maintenance."""
+        assert _rewrite(grpc_name) == jsonrpc_name
 
     def test_singular_list_push_notification_config_is_unknown(self) -> None:
         """Guard against the singular-typo regression. The proto name
         is ``ListTaskPushNotificationConfigs`` (plural Configs); the
         singular form must NOT be silently rewritten."""
-        assert (
-            self._rewrite("ListTaskPushNotificationConfig")
-            == "ListTaskPushNotificationConfig"
-        )
-
-    def test_delete_push_notification_config_alias(self) -> None:
-        assert (
-            self._rewrite("DeleteTaskPushNotificationConfig")
-            == "tasks/pushNotificationConfig/delete"
-        )
-
-    def test_get_extended_agent_card_alias(self) -> None:
-        assert (
-            self._rewrite("GetExtendedAgentCard")
-            == "agent/getAuthenticatedExtendedCard"
+        assert _rewrite("ListTaskPushNotificationConfig") == (
+            "ListTaskPushNotificationConfig"
         )
 
     def test_alias_table_has_eleven_entries(self) -> None:
@@ -126,11 +90,11 @@ class TestMethodAliases:
         }
 
     def test_unknown_method_passes_through(self) -> None:
-        assert self._rewrite("Frobnicate") == "Frobnicate"
+        assert _rewrite("Frobnicate") == "Frobnicate"
 
     def test_spec_form_method_passes_through(self) -> None:
         """Already-spec-form methods stay verbatim — idempotent."""
-        assert self._rewrite("message/send") == "message/send"
+        assert _rewrite("message/send") == "message/send"
 
 
 # ---------------------------------------------------------------------------
