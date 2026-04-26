@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -51,6 +52,57 @@ A2A_AGENT_URL: str = os.environ.get("A2A_AGENT_URL", "http://localhost:9000")
 
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# FHIR source override (dashboard portfolio play)
+# ---------------------------------------------------------------------------
+#
+# The frontend can ask the proxy to read FHIR from a different workspace than
+# the local HAPI by sending three headers: X-Vigil-Fhir-Source (hapi|po),
+# X-Vigil-Fhir-Url (the workspace URL the user typed in settings) and
+# X-Vigil-Fhir-Token (an opaque bearer for that workspace). The URL is honoured
+# only when it matches the regex allowlist below — defence-in-depth so a
+# malicious tab can't redirect FHIR traffic to an arbitrary host. On any
+# validation failure we fall back to the local HAPI silently and emit a warn
+# log (no PII, never log token values).
+#
+# The approve endpoint refuses with 409 when source != "hapi": writes go to
+# HAPI only; PO mode is read-only by design.
+
+_PO_FHIR_URL_RE = re.compile(
+    r"^https://app\.promptopinion\.ai/api/workspaces/[a-f0-9-]+/fhir/?$"
+)
+
+
+def resolve_fhir_source(request: Request) -> tuple[str, str | None, str]:
+    """Resolve the effective FHIR target for this request.
+
+    Returns ``(effective_url, token, source_id)`` where ``source_id`` is the
+    canonical label ``"hapi"`` or ``"po"``. Falls back to
+    ``(FHIR_BASE_URL, None, "hapi")`` on any validation failure with a
+    structured warn log (no PII, never the token value).
+    """
+    raw_source = (request.headers.get("X-Vigil-Fhir-Source") or "").strip().lower()
+    if not raw_source or raw_source == "hapi":
+        return (FHIR_BASE_URL, None, "hapi")
+
+    if raw_source != "po":
+        logger.warning(
+            "FHIR source override rejected: unknown source value",
+            extra={"_vigil_fhir_source_raw": raw_source},
+        )
+        return (FHIR_BASE_URL, None, "hapi")
+
+    raw_url = (request.headers.get("X-Vigil-Fhir-Url") or "").strip()
+    if not _PO_FHIR_URL_RE.match(raw_url):
+        logger.warning(
+            "FHIR source override rejected: URL failed regex, falling back to hapi",
+            extra={"_vigil_fhir_source_raw": raw_source},
+        )
+        return (FHIR_BASE_URL, None, "hapi")
+
+    token = request.headers.get("X-Vigil-Fhir-Token") or None
+    return (raw_url.rstrip("/"), token, "po")
 
 # ---------------------------------------------------------------------------
 # App
@@ -155,21 +207,27 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/patients")
-async def list_patients() -> dict[str, Any]:
+async def list_patients(request: Request) -> dict[str, Any]:
     """List all monitored patients with status summary. API_CONTRACTS.md §6.1"""
+    effective_url, token, _source_id = resolve_fhir_source(request)
     try:
-        return await list_patients_action(fhir_base_url=FHIR_BASE_URL)
+        return await list_patients_action(
+            fhir_base_url=effective_url, fhir_token=token
+        )
     except FhirClientError as exc:
         logger.error("list_patients FHIR error", extra={"_vigil_error": str(exc)})
         raise HTTPException(status_code=502, detail=f"FHIR error: {exc}") from exc
 
 
 @app.get("/api/patients/{patient_id}")
-async def get_patient(patient_id: str) -> dict[str, Any]:
+async def get_patient(patient_id: str, request: Request) -> dict[str, Any]:
     """Full dashboard payload for a patient. API_CONTRACTS.md §6.2"""
+    effective_url, token, _source_id = resolve_fhir_source(request)
     try:
         return await get_patient_detail_action(
-            patient_id=patient_id, fhir_base_url=FHIR_BASE_URL
+            patient_id=patient_id,
+            fhir_base_url=effective_url,
+            fhir_token=token,
         )
     except FhirClientError as exc:
         if exc.status_code == 404:
@@ -211,6 +269,7 @@ async def approve_alert(
     patient_id: str,
     alert_id: str,
     body: ApproveRequest,
+    request: Request,
 ) -> Any:
     """Clinician approval — the ONLY FHIR write in the stack.
 
@@ -218,6 +277,21 @@ async def approve_alert(
     API_CONTRACTS.md §6.4.
     """
     from backend.api.review_queue import get_alert
+
+    # Defence-in-depth: refuse approve when the dashboard is pointed at any
+    # non-HAPI FHIR source. The frontend separately disables the button so
+    # this 409 only fires when a client tries to bypass the UI gate. Must
+    # short-circuit *before* claim_alert_for_writing so the queue state is
+    # untouched on a refused write.
+    effective_url, token, source_id = resolve_fhir_source(request)
+    if source_id != "hapi":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Approve is disabled in {source_id} mode. "
+                "Switch source to 'hapi' to acknowledge alerts."
+            ),
+        )
 
     # Pre-flight checks — give specific errors for each impossible state
     alert = await asyncio.to_thread(get_alert, alert_id)
@@ -244,7 +318,8 @@ async def approve_alert(
             patient_id=patient_id,
             alert_id=alert_id,
             body=body,
-            fhir_base_url=FHIR_BASE_URL,
+            fhir_base_url=effective_url,
+            fhir_token=token,
         )
     except FhirClientError as exc:
         logger.error("approve FHIR error", extra={"_vigil_error": str(exc)})
@@ -333,13 +408,24 @@ async def agent_tick() -> dict[str, Any]:
 
 
 @app.get("/api/status")
-async def get_status() -> dict[str, Any]:
-    """Current LLM provider, FHIR URL, and connection health. FE6."""
+async def get_status(request: Request) -> dict[str, Any]:
+    """Current LLM provider, FHIR URL, and connection health. FE6.
+
+    Probes ``effective_url/metadata`` resolved from this request's headers,
+    not the env default — so the settings page surfaces the live source the
+    dashboard is actually reading from.
+    """
+    effective_url, token, source_id = resolve_fhir_source(request)
     fhir_healthy = False
     fhir_error: str | None = None
+    probe_headers: dict[str, str] = {}
+    if token:
+        probe_headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{FHIR_BASE_URL}/metadata")
+            r = await client.get(
+                f"{effective_url}/metadata", headers=probe_headers
+            )
         fhir_healthy = r.status_code == 200
         if not fhir_healthy:
             fhir_error = f"HTTP {r.status_code}"
@@ -358,7 +444,9 @@ async def get_status() -> dict[str, Any]:
 
     return {
         "llm_provider": LLM_PROVIDER,
-        "fhir_url": FHIR_BASE_URL,
+        "fhir_url": effective_url,
+        "fhir_url_label": effective_url,
+        "fhir_source": source_id,
         "fhir_healthy": fhir_healthy,
         "fhir_error": fhir_error,
         "agent_healthy": agent_healthy,
