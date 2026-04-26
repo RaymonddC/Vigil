@@ -9,7 +9,15 @@ import {
   onClinicianChange,
   type Clinician,
 } from "@/lib/clinicians";
+import {
+  getSelectedFhirSourceId,
+  onFhirSourceChange,
+  type FhirSourceId,
+} from "@/lib/fhir-sources";
 import { ackAlert } from "@/lib/api";
+
+const APPROVE_DISABLED_TITLE =
+  "Approval is disabled when reading from an external FHIR source. Switch to local HAPI to acknowledge alerts.";
 
 function initialsOf(name: string): string {
   const stripped = name.replace(/^Dr\.\s+/i, "").trim();
@@ -36,6 +44,15 @@ function useCurrentClinician(): Clinician {
   return CLINICIANS.find((c) => c.id === id) ?? CLINICIANS[0];
 }
 
+/** Subscribe to FHIR-source selection. SSR-safe: returns "hapi" on the server. */
+function useCurrentFhirSource(): FhirSourceId {
+  return React.useSyncExternalStore(
+    (cb) => onFhirSourceChange(() => cb()),
+    () => getSelectedFhirSourceId(),
+    () => "hapi"
+  );
+}
+
 export interface ApproveBarProps {
   patientId: string;
   alertId: string;
@@ -58,16 +75,19 @@ export function ApproveBar({
   onApproved,
 }: ApproveBarProps) {
   const clinician = useCurrentClinician();
+  const fhirSource = useCurrentFhirSource();
   const router = useRouter();
   const [approved, setApproved] = React.useState(initialApproved);
   const [approvedAt, setApprovedAt] = React.useState<string>("");
   const [pending, setPending] = React.useState(false);
 
+  const writesBlocked = fhirSource !== "hapi";
+
   // Per-clinician "full name" string. The brief is exact about this copy.
   const fullName = React.useMemo(() => clinician.name, [clinician]);
 
   async function handleApprove() {
-    if (pending || approved) return;
+    if (pending || approved || writesBlocked) return;
     setPending(true);
     try {
       const res = await ackAlert(patientId, alertId);
@@ -121,8 +141,9 @@ export function ApproveBar({
         type="button"
         className="btn btn--primary btn--lg"
         onClick={handleApprove}
-        disabled={pending}
+        disabled={pending || writesBlocked}
         aria-busy={pending}
+        title={writesBlocked ? APPROVE_DISABLED_TITLE : undefined}
       >
         {pending ? "Approving…" : "Approve handoff →"}
       </button>
