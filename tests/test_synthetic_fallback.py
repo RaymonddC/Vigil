@@ -137,23 +137,53 @@ class TestTimestampRebasing:
 
 
 class TestAuthErrorDetection:
-    def test_403_is_auth_error(self) -> None:
+    """Narrow mode (env flag OFF): only 401/403 trigger fallback."""
+
+    def test_403_is_auth_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
         exc = FhirClientError("forbidden", status_code=403)
         assert is_fhir_auth_error(exc) is True
 
-    def test_401_is_auth_error(self) -> None:
+    def test_401_is_auth_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
         exc = FhirClientError("unauthorised", status_code=401)
         assert is_fhir_auth_error(exc) is True
 
-    def test_500_is_not_auth_error(self) -> None:
+    def test_500_is_not_auth_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
         exc = FhirClientError("server error", status_code=500)
         assert is_fhir_auth_error(exc) is False
 
-    def test_404_is_not_auth_error(self) -> None:
+    def test_404_is_not_auth_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
         exc = FhirClientError("not found", status_code=404)
         assert is_fhir_auth_error(exc) is False
 
-    def test_unrelated_exception_is_not_auth_error(self) -> None:
+    def test_unrelated_exception_is_not_auth_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+        assert is_fhir_auth_error(ValueError("boom")) is False
+
+
+class TestAuthErrorDetectionDemoMode:
+    """Demo mode (env flag ON): any FhirClientError triggers fallback so
+    PO's launchpad always renders something coherent regardless of which
+    failure mode their FHIR proxy hits (403 anonymous, 422 bad workspace,
+    503 transient)."""
+
+    def test_403_triggers_in_demo_mode(self, monkeypatch) -> None:
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        assert is_fhir_auth_error(FhirClientError("forbidden", status_code=403)) is True
+
+    def test_422_triggers_in_demo_mode(self, monkeypatch) -> None:
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        assert is_fhir_auth_error(FhirClientError("unprocessable", status_code=422)) is True
+
+    def test_500_triggers_in_demo_mode(self, monkeypatch) -> None:
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        assert is_fhir_auth_error(FhirClientError("server error", status_code=500)) is True
+
+    def test_non_fhir_exception_does_not_trigger(self, monkeypatch) -> None:
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
         assert is_fhir_auth_error(ValueError("boom")) is False
 
 

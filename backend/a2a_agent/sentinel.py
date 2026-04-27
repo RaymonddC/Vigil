@@ -405,14 +405,24 @@ class PostopSentinelExecutor(AgentExecutor):
             "rapid_response" if sepsis_triggered else "charge_nurse"
         )
 
+        # Unwrap each upstream result before forwarding — the MCP tool
+        # signature expects flat dicts (with ``breaches``, ``qsofa_score``,
+        # etc.), not the FastMCP wrapper ``{content: [...], structuredContent}``.
+        # Forwarding the wrapper makes the LLM see empty inputs and emit
+        # "no breaches / qSOFA 0/3 / unknown" prose regardless of what
+        # actually happened upstream.
+        unwrapped_vitals = _unwrap_tool_result(screen_result)
+        unwrapped_risk = _unwrap_tool_result(risk_result)
+        unwrapped_sepsis = _unwrap_tool_result(sepsis_result)
+
         try:
             escalation_result = await self._mcp.call_tool(
                 "generate_escalation_note",
                 arguments={
                     "patient_id": patient_id,
-                    "vitals_result": screen_result,
-                    "risk_result": risk_result,
-                    "sepsis_result": sepsis_result,
+                    "vitals_result": unwrapped_vitals,
+                    "risk_result": unwrapped_risk,
+                    "sepsis_result": unwrapped_sepsis,
                     "recipient_role": recipient_role,
                 },
                 sharp_headers=sharp_headers,

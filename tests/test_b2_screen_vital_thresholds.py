@@ -422,8 +422,12 @@ class TestB2SyntheticFallback:
         assert result["status"] == ToolStatus.FHIR_UNAVAILABLE
         assert result["data_source"] == "fhir"
 
-    async def test_500_with_env_does_not_use_synthetic(self, monkeypatch):
-        """5xx is NOT an auth error — fallback must not engage."""
+    async def test_500_with_env_uses_synthetic_in_demo_mode(self, monkeypatch):
+        """In demo mode, ANY FhirClientError (including 5xx) flips to
+        synthetic so PO's launchpad always renders something coherent.
+        With the env flag OFF (production default) this test's twin
+        ``test_500_without_env_does_not_use_synthetic`` confirms 5xx still
+        propagates as ``fhir_error``."""
         monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
         sf.reset_for_tests()
 
@@ -435,5 +439,7 @@ class TestB2SyntheticFallback:
             raw = await run("PT-007", 240, "postop", _sharp("PT-007"))
 
         result = json.loads(raw)
-        assert result["status"] == ToolStatus.FHIR_UNAVAILABLE
-        assert result["data_source"] == "fhir"
+        assert result["data_source"] == "synthetic_demo"
+        # PT-007's bundled trajectory has SBP < 90 + HR > 110, so the
+        # screen should trigger.
+        assert result["status"] == ToolStatus.TRIGGERED
