@@ -13,7 +13,13 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from backend.criteria.mewt import VitalReading, evaluate_mewt
-from backend.fhir.client import FhirClient, FhirClientError
+from backend.fhir.client import FhirClient, FhirClientError, is_fhir_auth_error
+from backend.mcp_server.synthetic_fallback import (
+    LIVE_DATA_SOURCE,
+    SYNTHETIC_DATA_SOURCE,
+    get_synthetic_observations,
+    is_fallback_enabled,
+)
 from backend.obs.metrics import tool_call_timer
 from backend.schemas import FhirContext, ScreenVitalsOutput, ToolStatus
 
@@ -54,6 +60,7 @@ async def run(
     since_iso = window_start.isoformat()
 
     async with tool_call_timer("screen_vital_thresholds", patient_id) as ctx:
+        data_source = LIVE_DATA_SOURCE
         try:
             async with FhirClient(sharp) as fhir:
                 observations = await fhir.get_observations(
@@ -62,21 +69,35 @@ async def run(
                     since=since_iso,
                 )
         except FhirClientError as exc:
-            logger.error(
-                "FHIR fetch failed for screen_vital_thresholds",
-                extra={"patient_id": patient_id, "error": str(exc)},
-            )
-            ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
-            output = ScreenVitalsOutput(
-                status=ToolStatus.FHIR_UNAVAILABLE,
-                patient_id=patient_id,
-                trajectory=trajectory,
-                breaches=[],
-                scanned_count=0,
-                window_start=window_start,
-                window_end=now,
-            )
-            return output.model_dump_json()
+            # Auth-shaped failures (401/403) are the canonical
+            # PO-launchpad-without-token scenario. When the demo opt-in
+            # is set, swap in PT-007's bundled trajectory so the
+            # downstream rule engine has real data to work with.
+            if is_fhir_auth_error(exc) and is_fallback_enabled():
+                logger.warning(
+                    "FHIR auth denied; using synthetic PT-007 trajectory",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                observations = get_synthetic_observations(
+                    category="vital-signs"
+                )
+                data_source = SYNTHETIC_DATA_SOURCE
+            else:
+                logger.error(
+                    "FHIR fetch failed for screen_vital_thresholds",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
+                output = ScreenVitalsOutput(
+                    status=ToolStatus.FHIR_UNAVAILABLE,
+                    patient_id=patient_id,
+                    trajectory=trajectory,
+                    breaches=[],
+                    scanned_count=0,
+                    window_start=window_start,
+                    window_end=now,
+                )
+                return output.model_dump_json()
 
         vitals = _obs_to_readings(observations)
         result = evaluate_mewt(vitals, trajectory)
@@ -102,5 +123,6 @@ async def run(
             scanned_count=len(vitals),
             window_start=window_start,
             window_end=now,
+            data_source=data_source,
         )
         return output.model_dump_json()

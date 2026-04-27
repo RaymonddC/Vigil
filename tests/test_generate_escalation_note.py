@@ -539,3 +539,71 @@ async def test_narrative_contains_sbar_sections():
     # Each section label should appear in the narrative
     for label in ("S:", "B:", "A:", "R:"):
         assert label in narrative, f"Missing '{label}' in narrative: {narrative[:200]}"
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-fallback propagation
+# ---------------------------------------------------------------------------
+
+async def test_data_source_propagates_from_upstream_synthetic():
+    """Even when the local FHIR demographics fetch succeeds, an upstream
+    tool result tagged synthetic_demo must be honoured — the SBAR was
+    generated from synthetic data and must say so."""
+    from backend.mcp_server import synthetic_fallback as sf
+
+    sf.reset_for_tests()
+    vitals_synth = {**VITALS_TRIGGERED, "data_source": "synthetic_demo"}
+
+    result = await _run_with_mocks(
+        mock_client=_mock_fhir_client(),
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+        vitals=vitals_synth,
+    )
+    assert result.data_source == "synthetic_demo"
+
+
+async def test_403_with_env_uses_synthetic_demographics(monkeypatch):
+    """403 on patient/encounter fetch + env on → load PT-007 demographics."""
+    from backend.mcp_server import synthetic_fallback as sf
+
+    monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+    sf.reset_for_tests()
+
+    mock_client = AsyncMock()
+    mock_client.get_patient.side_effect = FhirClientError(
+        "Insufficient scope access", status_code=403
+    )
+    mock_client.get_encounter.side_effect = FhirClientError(
+        "Insufficient scope access", status_code=403
+    )
+
+    result = await _run_with_mocks(
+        mock_client=mock_client,
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+    )
+    assert result.data_source == "synthetic_demo"
+    # PT-007's encounter ships with id="ENC-PT-007"; the draft must
+    # reference it instead of being empty.
+    assert (
+        "ENC-PT-007"
+        in result.communication_draft.get("encounter", {}).get("reference", "")
+    )
+
+
+async def test_403_without_env_does_not_use_synthetic(monkeypatch):
+    """Default-off: 403 falls back to the existing default-name behaviour
+    without engaging the synthetic path."""
+    from backend.mcp_server import synthetic_fallback as sf
+
+    monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+    sf.reset_for_tests()
+
+    mock_client = AsyncMock()
+    mock_client.get_patient.side_effect = FhirClientError("forbidden", 403)
+    mock_client.get_encounter.side_effect = FhirClientError("forbidden", 403)
+
+    result = await _run_with_mocks(
+        mock_client=mock_client,
+        mock_provider=_mock_llm_json(GOOD_SBAR),
+    )
+    assert result.data_source == "fhir"

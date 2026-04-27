@@ -605,3 +605,119 @@ class TestFriendlyFailures:
         text = _final_text(event_queue)
         assert "HAPI FHIR server unreachable" in text
         assert PATIENT_ID in text
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-fallback disclosure — the agent's chat reply must say so.
+# ---------------------------------------------------------------------------
+
+
+class TestSyntheticFallbackDisclosure:
+    """When MCP tool output carries data_source='synthetic_demo', the
+    skill handler prefixes the reply with an honest one-liner and
+    echoes data_source in A2A response metadata."""
+
+    @pytest.mark.asyncio
+    async def test_screen_vitals_disclosure_in_text_and_metadata(self) -> None:
+        mcp = MagicMock()
+        mcp.call_tool = AsyncMock(
+            return_value=_mcp_text(
+                {
+                    "status": "ok",
+                    "patient_id": PATIENT_ID,
+                    "trajectory": "postop",
+                    "breaches": [],
+                    "scanned_count": 9,
+                    "window_start": "2026-04-15T08:00:00Z",
+                    "window_end": "2026-04-15T12:00:00Z",
+                    "data_source": "synthetic_demo",
+                }
+            )
+        )
+        executor = PostopSentinelExecutor(mcp=mcp)
+        ctx = _make_context(
+            _make_message(text="screen vitals", fhir_metadata=_fhir_metadata())
+        )
+        event_queue = _make_event_queue()
+
+        await executor.execute(ctx, event_queue)
+
+        text = _final_text(event_queue)
+        # Honest one-liner — must reference the demo trajectory.
+        assert (
+            "demo trajectory" in text.lower()
+            or "synthetic" in text.lower()
+        )
+        # The actual screening result is still present.
+        assert "Vital screen" in text
+
+        # Response metadata carries the data_source for downstream consumers.
+        task = _final_task(event_queue)
+        meta = task.status.message.metadata or {}
+        assert meta.get("data_source") == "synthetic_demo"
+
+    @pytest.mark.asyncio
+    async def test_check_sepsis_disclosure_in_text(self) -> None:
+        mcp = MagicMock()
+        mcp.call_tool = AsyncMock(
+            return_value=_mcp_text(
+                {
+                    "status": "triggered",
+                    "patient_id": PATIENT_ID,
+                    "sepsis_suspected": True,
+                    "mode": "cdc_ase",
+                    "criteria_met": ["organ dysfunction: lactate 2.4"],
+                    "onset_estimate": None,
+                    "evidence": {},
+                    "data_source": "synthetic_demo",
+                }
+            )
+        )
+        executor = PostopSentinelExecutor(mcp=mcp)
+        ctx = _make_context(
+            _make_message(text="check sepsis", fhir_metadata=_fhir_metadata())
+        )
+        event_queue = _make_event_queue()
+
+        await executor.execute(ctx, event_queue)
+
+        text = _final_text(event_queue)
+        assert (
+            "demo trajectory" in text.lower()
+            or "synthetic" in text.lower()
+        )
+        assert "SUSPECTED" in text
+
+    @pytest.mark.asyncio
+    async def test_live_data_does_not_add_disclosure(self) -> None:
+        """Live FHIR data must not trigger the synthetic disclosure."""
+        mcp = MagicMock()
+        mcp.call_tool = AsyncMock(
+            return_value=_mcp_text(
+                {
+                    "status": "ok",
+                    "patient_id": PATIENT_ID,
+                    "trajectory": "postop",
+                    "breaches": [],
+                    "scanned_count": 9,
+                    "window_start": "2026-04-15T08:00:00Z",
+                    "window_end": "2026-04-15T12:00:00Z",
+                    "data_source": "fhir",
+                }
+            )
+        )
+        executor = PostopSentinelExecutor(mcp=mcp)
+        ctx = _make_context(
+            _make_message(text="screen vitals", fhir_metadata=_fhir_metadata())
+        )
+        event_queue = _make_event_queue()
+
+        await executor.execute(ctx, event_queue)
+
+        text = _final_text(event_queue)
+        assert "demo trajectory" not in text.lower()
+        assert "synthetic" not in text.lower()
+
+        task = _final_task(event_queue)
+        meta = task.status.message.metadata or {}
+        assert meta.get("data_source") == "fhir"

@@ -29,6 +29,21 @@ class FhirClientError(Exception):
         self.status_code = status_code
 
 
+def is_fhir_auth_error(exc: BaseException) -> bool:
+    """Return True if the exception indicates a FHIR auth/scope failure.
+
+    The MCP tools use this to decide whether to fall back to bundled
+    synthetic data (see :mod:`backend.mcp_server.synthetic_fallback`) when
+    the live FHIR server rejects the read with 401/403 — the typical
+    failure mode when Prompt Opinion's launchpad invokes us without a
+    SMART-scoped bearer token. Other FHIR errors (5xx, 404, malformed
+    JSON) are NOT treated as auth failures and propagate through the
+    existing ``fhir_error`` envelope path so production deployments
+    against a real FHIR server still surface server-side problems.
+    """
+    return isinstance(exc, FhirClientError) and exc.status_code in (401, 403)
+
+
 class FhirClient:
     """Async FHIR R4 client backed by httpx.
 

@@ -21,7 +21,14 @@ from datetime import UTC, datetime, timedelta
 
 from backend.criteria.mewt import VitalReading, evaluate_mewt
 from backend.criteria.qsofa import evaluate_qsofa
-from backend.fhir.client import FhirClient, FhirClientError
+from backend.fhir.client import FhirClient, FhirClientError, is_fhir_auth_error
+from backend.mcp_server.synthetic_fallback import (
+    LIVE_DATA_SOURCE,
+    SYNTHETIC_DATA_SOURCE,
+    get_synthetic_conditions,
+    get_synthetic_observations,
+    is_fallback_enabled,
+)
 from backend.obs.metrics import tool_call_timer
 from backend.schemas import FhirContext, RiskScoreOutput, ToolStatus
 
@@ -88,6 +95,7 @@ async def run(
     since_iso = (now - timedelta(hours=window_hours)).isoformat()
 
     async with tool_call_timer("score_deterioration_risk", patient_id) as ctx:
+        data_source = LIVE_DATA_SOURCE
         try:
             async with FhirClient(sharp) as fhir:
                 observations = await fhir.get_observations(
@@ -97,26 +105,39 @@ async def run(
                 )
                 conditions = await fhir.get_conditions(patient_id)
         except FhirClientError as exc:
-            logger.error(
-                "FHIR fetch failed for score_deterioration_risk",
-                extra={"patient_id": patient_id, "error": str(exc)},
-            )
-            ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
-            output = RiskScoreOutput(
-                status=ToolStatus.FHIR_UNAVAILABLE,
-                patient_id=patient_id,
-                qsofa_score=0,
-                qsofa_components={
-                    "rr_ge_22": False,
-                    "sbp_le_100": False,
-                    "altered_mental": False,
-                },
-                composite_risk=0.0,
-                risk_band="low",
-                rationale=f"FHIR unavailable: {exc}",
-                contributing_conditions=[],
-            )
-            return output.model_dump_json()
+            # Auth-shaped failure → opt-in fallback to PT-007 trajectory.
+            # See backend/mcp_server/synthetic_fallback.py docstring.
+            if is_fhir_auth_error(exc) and is_fallback_enabled():
+                logger.warning(
+                    "FHIR auth denied; using synthetic PT-007 trajectory",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                observations = get_synthetic_observations(
+                    category="vital-signs"
+                )
+                conditions = get_synthetic_conditions()
+                data_source = SYNTHETIC_DATA_SOURCE
+            else:
+                logger.error(
+                    "FHIR fetch failed for score_deterioration_risk",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
+                output = RiskScoreOutput(
+                    status=ToolStatus.FHIR_UNAVAILABLE,
+                    patient_id=patient_id,
+                    qsofa_score=0,
+                    qsofa_components={
+                        "rr_ge_22": False,
+                        "sbp_le_100": False,
+                        "altered_mental": False,
+                    },
+                    composite_risk=0.0,
+                    risk_band="low",
+                    rationale=f"FHIR unavailable: {exc}",
+                    contributing_conditions=[],
+                )
+                return output.model_dump_json()
 
         # Convert observations to VitalReading
         vitals: list[VitalReading] = []
@@ -197,5 +218,6 @@ async def run(
             risk_band=band,
             rationale=rationale,
             contributing_conditions=condition_labels,
+            data_source=data_source,
         )
         return output.model_dump_json()

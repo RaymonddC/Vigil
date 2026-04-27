@@ -31,8 +31,9 @@ from backend.fhir.models import (
     Observation,
     Quantity,
 )
+from backend.mcp_server import synthetic_fallback as sf
 from backend.mcp_server.tools.flag_sepsis_onset import run
-from backend.schemas import FhirContext, SepsisFlagOutput
+from backend.schemas import FhirContext, SepsisFlagOutput, ToolStatus
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -402,3 +403,65 @@ async def test_recent_therapeutic_abx_counts_as_infection():
     assert result.mode == "cdc_ase"
     assert any("antibiotic" in c.lower() or "infection" in c.lower()
                for c in result.criteria_met)
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-fallback tests — auth errors trigger PT-007 trajectory load
+# ---------------------------------------------------------------------------
+
+
+async def test_403_with_env_uses_synthetic(monkeypatch):
+    """403 + VIGIL_SYNTHETIC_FALLBACK=true → load PT-007, return real reasoning."""
+    monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+    sf.reset_for_tests()
+
+    mock_client = AsyncMock()
+    mock_client.get_observations.side_effect = FhirClientError(
+        "Insufficient scope access", status_code=403
+    )
+    mock_client.get_medication_administrations.side_effect = FhirClientError(
+        "Insufficient scope access", status_code=403
+    )
+
+    with patch(
+        "backend.mcp_server.tools.flag_sepsis_onset.tool_call_timer", _noop_timer
+    ), patch("backend.mcp_server.tools.flag_sepsis_onset.FhirClient") as MockFC:
+        MockFC.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        MockFC.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result_json = await run("PT-007", 24, FHIR_CTX)
+
+    result = SepsisFlagOutput.model_validate_json(result_json)
+    assert result.data_source == "synthetic_demo"
+    # PT-007 has lactate >= 2.0 at T4/T8 and qSOFA components — even
+    # without empirical antibiotics, the evidence dict must carry real
+    # values rather than the {"error": "..."} envelope.
+    assert "error" not in result.evidence
+    # Lactate value is present (real lab from the bundle, not None)
+    assert result.evidence.get("lactate_value") is not None
+
+
+async def test_403_without_env_returns_error_envelope(monkeypatch):
+    """Default-off behaviour: 403 still becomes a fhir_error envelope."""
+    monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+    sf.reset_for_tests()
+
+    mock_client = AsyncMock()
+    mock_client.get_observations.side_effect = FhirClientError(
+        "forbidden", status_code=403
+    )
+    mock_client.get_medication_administrations.side_effect = FhirClientError(
+        "forbidden", status_code=403
+    )
+
+    with patch(
+        "backend.mcp_server.tools.flag_sepsis_onset.tool_call_timer", _noop_timer
+    ), patch("backend.mcp_server.tools.flag_sepsis_onset.FhirClient") as MockFC:
+        MockFC.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        MockFC.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result_json = await run("PT-007", 24, FHIR_CTX)
+
+    result = SepsisFlagOutput.model_validate_json(result_json)
+    assert result.status == ToolStatus.FHIR_UNAVAILABLE
+    assert result.data_source == "fhir"

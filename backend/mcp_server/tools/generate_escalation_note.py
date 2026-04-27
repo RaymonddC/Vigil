@@ -19,8 +19,15 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from backend.cache import get_llm_cached, set_llm_cached
-from backend.fhir.client import FhirClient, FhirClientError
+from backend.fhir.client import FhirClient, FhirClientError, is_fhir_auth_error
 from backend.llm.provider import LLMError, get_provider
+from backend.mcp_server.synthetic_fallback import (
+    LIVE_DATA_SOURCE,
+    SYNTHETIC_DATA_SOURCE,
+    get_synthetic_encounter,
+    get_synthetic_patient,
+    is_fallback_enabled,
+)
 from backend.obs.metrics import record_llm_call, tool_call_timer
 from backend.schemas import (
     SBAR,
@@ -344,6 +351,19 @@ async def run(
         patient_name = f"Patient {patient_id}"
         encounter_id: str | None = None
 
+        # Inherit synthetic-data marking from upstream screening results
+        # — if the screens already used the fallback, this tool's output
+        # must say so too even when the encounter fetch happens to
+        # succeed (e.g., the test harness only mocks part of the path).
+        upstream_synthetic = (
+            vitals_result.get("data_source") == SYNTHETIC_DATA_SOURCE
+            or risk_result.get("data_source") == SYNTHETIC_DATA_SOURCE
+            or sepsis_result.get("data_source") == SYNTHETIC_DATA_SOURCE
+        )
+        data_source = (
+            SYNTHETIC_DATA_SOURCE if upstream_synthetic else LIVE_DATA_SOURCE
+        )
+
         try:
             async with FhirClient(sharp) as fhir:
                 patient = await fhir.get_patient(patient_id)
@@ -357,10 +377,32 @@ async def run(
                 if encounter:
                     encounter_id = encounter.id
         except FhirClientError as exc:
-            logger.warning(
-                "FHIR context fetch failed, proceeding with defaults",
-                extra={"patient_id": patient_id, "error": str(exc)},
-            )
+            # Auth-shaped failure → opt-in fallback to PT-007's
+            # demographics so the SBAR prompt has a real name to use
+            # instead of "Patient PT-007". Other FHIR errors fall
+            # through to the existing default-name path.
+            if is_fhir_auth_error(exc) and is_fallback_enabled():
+                logger.warning(
+                    "FHIR auth denied; using synthetic PT-007 demographics",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                data_source = SYNTHETIC_DATA_SOURCE
+                synthetic_patient = get_synthetic_patient()
+                if synthetic_patient.name:
+                    name = synthetic_patient.name[0]
+                    given = " ".join(name.given) if name.given else ""
+                    family = name.family or ""
+                    patient_name = (
+                        f"{given} {family}".strip() or patient_name
+                    )
+                synthetic_encounter = get_synthetic_encounter()
+                if synthetic_encounter:
+                    encounter_id = synthetic_encounter.id
+            else:
+                logger.warning(
+                    "FHIR context fetch failed, proceeding with defaults",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
 
         severity = _determine_severity(
             vitals_result, risk_result, sepsis_result,
@@ -439,6 +481,7 @@ async def run(
                 ),
                 generated_at=datetime.now(UTC),
                 model_used=model_used,
+                data_source=data_source,
             )
             return output.model_dump_json()
 
@@ -475,5 +518,6 @@ async def run(
             ),
             generated_at=datetime.now(UTC),
             model_used=model_used,
+            data_source=data_source,
         )
         return output.model_dump_json()

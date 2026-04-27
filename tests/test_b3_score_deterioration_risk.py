@@ -32,6 +32,7 @@ from backend.fhir.models import (
     Observation,
     Quantity,
 )
+from backend.mcp_server import synthetic_fallback as sf
 from backend.mcp_server.tools.score_deterioration_risk import run
 from backend.schemas import FhirContext, ToolStatus
 
@@ -424,3 +425,58 @@ class TestB3OutputSchema:
 
             result = json.loads(raw)
             assert result["risk_band"] in ("low", "moderate", "high")
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-fallback tests
+# ---------------------------------------------------------------------------
+
+
+class TestB3SyntheticFallback:
+    """403 + env var → swap in PT-007's bundled trajectory + tag output."""
+
+    async def test_403_with_env_uses_synthetic(self, monkeypatch):
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        sf.reset_for_tests()
+
+        with patch("backend.mcp_server.tools.score_deterioration_risk.FhirClient") as M:
+            inst = M.return_value.__aenter__.return_value
+            inst.get_observations = AsyncMock(
+                side_effect=FhirClientError(
+                    "Insufficient scope access", status_code=403
+                )
+            )
+            inst.get_conditions = AsyncMock(
+                side_effect=FhirClientError(
+                    "Insufficient scope access", status_code=403
+                )
+            )
+
+            raw = await run("PT-007", 6, "postop", _sharp("PT-007"))
+
+        result = json.loads(raw)
+        assert result["data_source"] == "synthetic_demo"
+        assert result["risk_band"] in ("moderate", "high")
+        # PT-007 ships with T2DM + CKD3 — both should land in
+        # contributing_conditions, not the empty list a fhir_error
+        # envelope would carry.
+        assert len(result["contributing_conditions"]) >= 1
+
+    async def test_403_without_env_returns_error_envelope(self, monkeypatch):
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+        sf.reset_for_tests()
+
+        with patch("backend.mcp_server.tools.score_deterioration_risk.FhirClient") as M:
+            inst = M.return_value.__aenter__.return_value
+            inst.get_observations = AsyncMock(
+                side_effect=FhirClientError("forbidden", status_code=403)
+            )
+            inst.get_conditions = AsyncMock(
+                side_effect=FhirClientError("forbidden", status_code=403)
+            )
+
+            raw = await run("PT-007", 6, "postop", _sharp("PT-007"))
+
+        result = json.loads(raw)
+        assert result["status"] == ToolStatus.FHIR_UNAVAILABLE
+        assert result["data_source"] == "fhir"
