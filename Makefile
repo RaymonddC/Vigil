@@ -1,4 +1,4 @@
-.PHONY: up down seed dev mcp agent test lint ci demo demo-stop demo-warmup e2e
+.PHONY: up down seed dev mcp agent test lint ci demo demo-stop demo-warmup e2e smoke
 
 # Infrastructure — local dev only spins up HAPI + its DB. The other
 # services (mcp, a2a, api, frontend, caddy) are defined in compose for
@@ -63,6 +63,20 @@ demo-warmup:
 	curl -sf http://localhost:3000/ > /dev/null
 	curl -sf http://localhost:3000/patients > /dev/null
 	@echo "=== All services healthy ==="
+
+# PO-flavor JSON-RPC smoke test against the running A2A agent.
+# Sends one SendMessage with the gRPC-flavor wire shape PO uses, then
+# pretty-prints the response. Useful to verify dispatch + skill routing
+# without round-tripping through PO's launchpad.
+#
+# Override any knob via env: AGENT, SKILL, PATIENT, FHIR_URL.
+# Examples:
+#   make smoke                                              # local agent → local HAPI
+#   make smoke SKILL=draft_sbar                             # different skill
+#   make smoke AGENT=https://abc.ngrok-free.app             # via ngrok
+#   make smoke PATIENT=abb130a6-... FHIR_URL=https://app.promptopinion.ai/...   # PO simulation
+smoke:
+	@./scripts/smoke_po.sh
 
 # E2E tests (requires make demo running)
 e2e:

@@ -10,6 +10,7 @@ import pytest
 
 from backend.llm.provider import (
     ClaudeProvider,
+    GeminiProvider,
     GroqProvider,
     LLMError,
     OllamaProvider,
@@ -197,6 +198,80 @@ class TestClaudeProvider:
 
 
 # ===================================================================
+# GeminiProvider
+# ===================================================================
+
+
+class TestGeminiProvider:
+    def test_requires_api_key(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
+            with pytest.raises(LLMError) as exc_info:
+                GeminiProvider()
+            assert "GEMINI_API_KEY" in str(exc_info.value)
+
+    def test_name_default_model(self):
+        env = os.environ.copy()
+        env["GEMINI_API_KEY"] = "test-key"
+        env.pop("GEMINI_MODEL", None)  # ensure default kicks in
+        with patch.dict(os.environ, env, clear=True):
+            provider = GeminiProvider()
+            assert provider.name == "gemini/gemini-2.5-flash-lite"
+
+    def test_custom_model(self):
+        with patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "key", "GEMINI_MODEL": "gemini-2.5-pro"},
+        ):
+            provider = GeminiProvider()
+            assert provider.name == "gemini/gemini-2.5-pro"
+
+    async def test_complete_success(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+            provider = GeminiProvider()
+        resp_data = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Gemini response"}]}}
+            ]
+        }
+        mock_client = _make_mock_client(resp_data)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await provider.complete("test prompt")
+        assert result == "Gemini response"
+
+    async def test_no_candidates_raises(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+            provider = GeminiProvider()
+        resp_data = {"candidates": []}
+        mock_client = _make_mock_client(resp_data)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(LLMError) as exc_info:
+                await provider.complete("test prompt")
+            assert "No candidates" in str(exc_info.value)
+
+    async def test_no_text_part_raises(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+            provider = GeminiProvider()
+        # Candidate exists but parts has no text field.
+        resp_data = {
+            "candidates": [{"content": {"parts": [{"inlineData": "..."}]}}]
+        }
+        mock_client = _make_mock_client(resp_data)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(LLMError) as exc_info:
+                await provider.complete("test prompt")
+            assert "No text part" in str(exc_info.value)
+
+    async def test_complete_error_raises(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+            provider = GeminiProvider()
+        mock_client = _make_mock_client({}, status=429)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(LLMError) as exc_info:
+                await provider.complete("test prompt")
+            assert exc_info.value.provider == "gemini"
+
+
+# ===================================================================
 # Factory
 # ===================================================================
 
@@ -204,6 +279,21 @@ class TestClaudeProvider:
 class TestGetProvider:
     def test_default_is_ollama(self):
         with patch.dict(os.environ, {}, clear=True):
+            provider = get_provider()
+            assert isinstance(provider, OllamaProvider)
+
+    def test_gemini_selected_with_key(self):
+        with patch.dict(
+            os.environ, {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "k"}
+        ):
+            provider = get_provider()
+            assert isinstance(provider, GeminiProvider)
+
+    def test_gemini_falls_back_to_ollama_without_key(self):
+        with patch.dict(
+            os.environ, {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": ""},
+            clear=False,
+        ):
             provider = get_provider()
             assert isinstance(provider, OllamaProvider)
 

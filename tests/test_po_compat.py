@@ -26,8 +26,11 @@ from httpx import ASGITransport, AsyncClient
 from backend.a2a_agent.po_compat import (
     PO_METHOD_ALIASES,
     PO_ROLE_ALIASES,
+    PO_ROLE_REVERSE,
+    PO_TASK_STATE_REVERSE,
     PoCompatMiddleware,
     normalise_po_payload,
+    normalise_po_response,
 )
 
 # ---------------------------------------------------------------------------
@@ -418,3 +421,203 @@ class TestMiddleware:
         # Echo handler returns whatever JSON body it parsed.
         assert resp.status_code == 200
         assert resp.json() == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Outbound response transformation
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseResponse:
+    """Pure-function tests for the spec → PO/gRPC-flavor response rewrite.
+
+    The transformation must:
+    - Wrap ``result`` in a ``task`` (or ``message``) oneof field based on
+      the spec-form ``kind`` discriminator.
+    - Map ``state`` values from spec form (``"completed"``) to gRPC-flavor
+      (``"TASK_STATE_COMPLETED"``) recursively.
+    - Map ``role`` values (``"agent"`` → ``"ROLE_AGENT"``) recursively.
+    - Pass error responses (no ``result``) through unchanged.
+    - Return a NEW dict; not mutate the input.
+    """
+
+    def _spec_response(self, **status_overrides: object) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": "r1",
+            "result": {
+                "kind": "task",
+                "id": "task-1",
+                "contextId": "ctx-1",
+                "status": {
+                    "state": "completed",
+                    "message": {
+                        "kind": "message",
+                        "messageId": "m1",
+                        "role": "agent",
+                        "parts": [{"kind": "text", "text": "hello"}],
+                    },
+                    **status_overrides,
+                },
+            },
+        }
+
+    def test_wraps_task_kind(self) -> None:
+        out = normalise_po_response(self._spec_response())
+        assert "task" in out["result"]
+        assert "kind" in out["result"]["task"]  # kind discriminator preserved
+
+    def test_wraps_message_kind(self) -> None:
+        body = {
+            "jsonrpc": "2.0",
+            "id": "r1",
+            "result": {
+                "kind": "message",
+                "messageId": "m1",
+                "role": "agent",
+                "parts": [{"kind": "text", "text": "ping"}],
+            },
+        }
+        out = normalise_po_response(body)
+        assert "message" in out["result"]
+        assert "task" not in out["result"]
+
+    def test_state_completed_to_grpc_form(self) -> None:
+        out = normalise_po_response(self._spec_response())
+        assert out["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+
+    def test_role_agent_to_grpc_form(self) -> None:
+        out = normalise_po_response(self._spec_response())
+        msg = out["result"]["task"]["status"]["message"]
+        assert msg["role"] == "ROLE_AGENT"
+
+    @pytest.mark.parametrize(
+        "spec_state,grpc_state",
+        list(PO_TASK_STATE_REVERSE.items()),
+        ids=list(PO_TASK_STATE_REVERSE.keys()),
+    )
+    def test_all_state_values_map(self, spec_state: str, grpc_state: str) -> None:
+        body = self._spec_response(state=spec_state)
+        out = normalise_po_response(body)
+        assert out["result"]["task"]["status"]["state"] == grpc_state
+
+    def test_error_response_passes_through(self) -> None:
+        body = {
+            "jsonrpc": "2.0",
+            "id": "r1",
+            "error": {"code": -32601, "message": "Method not found"},
+        }
+        out = normalise_po_response(body)
+        # No transformation — just a deep copy
+        assert out == body
+        assert out is not body  # new object
+
+    def test_response_without_result_passes_through(self) -> None:
+        body = {"jsonrpc": "2.0", "id": "r1"}  # notification or weird shape
+        out = normalise_po_response(body)
+        assert out == body
+        assert out is not body
+
+    def test_unknown_kind_no_wrap(self) -> None:
+        body = {
+            "jsonrpc": "2.0",
+            "id": "r1",
+            "result": {"kind": "unrecognised", "id": "x"},
+        }
+        out = normalise_po_response(body)
+        # Unknown discriminator — leave the structure alone
+        assert "task" not in out["result"]
+        assert "message" not in out["result"]
+
+    def test_does_not_mutate_input(self) -> None:
+        body = self._spec_response()
+        before = json.dumps(body, sort_keys=True)
+        _ = normalise_po_response(body)
+        after = json.dumps(body, sort_keys=True)
+        assert before == after, "input was mutated"
+
+    def test_role_reverse_table_round_trips(self) -> None:
+        # Sanity: every PO_ROLE_ALIASES entry has an inverse in PO_ROLE_REVERSE
+        for grpc, spec in PO_ROLE_ALIASES.items():
+            assert PO_ROLE_REVERSE[spec] == grpc
+
+    def test_nested_messages_in_history_get_role_remapped(self) -> None:
+        body = {
+            "jsonrpc": "2.0",
+            "id": "r1",
+            "result": {
+                "kind": "task",
+                "id": "task-1",
+                "status": {
+                    "state": "working",
+                    "message": {"role": "agent", "messageId": "m1"},
+                },
+                "history": [
+                    {"role": "user", "messageId": "h1"},
+                    {"role": "agent", "messageId": "h2"},
+                ],
+            },
+        }
+        out = normalise_po_response(body)
+        history = out["result"]["task"]["history"]
+        assert history[0]["role"] == "ROLE_USER"
+        assert history[1]["role"] == "ROLE_AGENT"
+        assert out["result"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
+
+
+class TestMiddlewareOutbound:
+    """End-to-end: POST /a2a → middleware rewrites response."""
+
+    @pytest.fixture
+    def app_with_spec_response(self) -> FastAPI:
+        """Mount a /a2a echo handler that returns a spec-form Task response."""
+        app = FastAPI()
+
+        @app.post("/a2a")
+        async def echo(_request: Request) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "r1",
+                    "result": {
+                        "kind": "task",
+                        "id": "task-1",
+                        "status": {
+                            "state": "completed",
+                            "message": {
+                                "kind": "message",
+                                "messageId": "m1",
+                                "role": "agent",
+                                "parts": [{"kind": "text", "text": "ok"}],
+                            },
+                        },
+                    },
+                }
+            )
+
+        app.add_middleware(PoCompatMiddleware)
+        return app
+
+    @pytest.mark.asyncio
+    async def test_response_wrapped_and_enums_remapped(
+        self, app_with_spec_response: FastAPI
+    ) -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=app_with_spec_response),
+            base_url="http://test",
+        ) as client:
+            resp = await client.post(
+                "/a2a",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "SendMessage",
+                    "params": {"message": {"role": "ROLE_USER", "parts": []}},
+                },
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        # The whole point: PO needs result.task wrapper + uppercase enums
+        assert "task" in body["result"]
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert body["result"]["task"]["status"]["message"]["role"] == "ROLE_AGENT"

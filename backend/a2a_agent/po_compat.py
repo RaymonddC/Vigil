@@ -1,9 +1,17 @@
-"""Bridge Prompt Opinion's gRPC-flavor A2A to the JSON-RPC spec form.
+"""Bridge Prompt Opinion's gRPC-flavor A2A to the JSON-RPC spec form, both ways.
 
-PO sends JSON-RPC envelopes with gRPC-style method names (PascalCase, no
-slash) and UPPER_SNAKE_CASE enum values. The installed ``a2a-sdk`` only
-recognises the JSON-RPC spec method names. This middleware normalises
-inbound requests so the SDK can dispatch them.
+Inbound (PO → SDK): PO sends JSON-RPC envelopes with gRPC-style method names
+(PascalCase, no slash) and UPPER_SNAKE_CASE enum values. The installed
+``a2a-sdk`` only recognises the JSON-RPC spec form. We rewrite the body
+before the SDK's request handler sees it.
+
+Outbound (SDK → PO): the SDK serialises responses in spec form
+(``result.kind="task"`` discriminator, ``status.state="completed"``,
+``role="agent"``). PO's ``SendA2AMessage`` tool deserialises the
+response with a proto-derived schema that expects the gRPC-flavor
+shape: result wrapped in a ``task`` (or ``message``) oneof field, and
+``TASK_STATE_*`` / ``ROLE_*`` enum values. We rewrite the response
+after the SDK has built it.
 
 Once the SDK ships native support — or PO adds spec-compliant aliases —
 this module can be deleted and the import in ``app.py`` reverted.
@@ -45,7 +53,7 @@ PO_METHOD_ALIASES: dict[str, str] = {
     "GetExtendedAgentCard": "agent/getAuthenticatedExtendedCard",
 }
 
-# Role-enum mapping. Verified against the proto:
+# Role-enum mapping (inbound: PO → spec). Verified against the proto:
 #
 #   enum Role {
 #     ROLE_UNSPECIFIED = 0;
@@ -58,6 +66,26 @@ PO_METHOD_ALIASES: dict[str, str] = {
 PO_ROLE_ALIASES: dict[str, str] = {
     "ROLE_USER": "user",
     "ROLE_AGENT": "agent",
+}
+
+# Reverse mappings for outbound responses (spec form → PO/gRPC-flavor).
+PO_ROLE_REVERSE: dict[str, str] = {v: k for k, v in PO_ROLE_ALIASES.items()}
+
+# TaskState enum — spec form (lowercase, dash-separated) → gRPC-flavor
+# (UPPER_SNAKE with TASK_STATE_ prefix). Verified against the proto's
+# ``enum TaskState { ... }`` block.
+PO_TASK_STATE_REVERSE: dict[str, str] = {
+    "submitted": "TASK_STATE_SUBMITTED",
+    "working": "TASK_STATE_WORKING",
+    "completed": "TASK_STATE_COMPLETED",
+    "failed": "TASK_STATE_FAILED",
+    "canceled": "TASK_STATE_CANCELED",
+    "cancelled": "TASK_STATE_CANCELED",  # spelling alias — both forms appear in the wild
+    "input-required": "TASK_STATE_INPUT_REQUIRED",
+    "rejected": "TASK_STATE_REJECTED",
+    "auth-required": "TASK_STATE_AUTH_REQUIRED",
+    "unknown": "TASK_STATE_UNSPECIFIED",
+    "": "TASK_STATE_UNSPECIFIED",
 }
 
 
@@ -79,6 +107,96 @@ def _rewrite_roles(node: Any) -> int:
         for item in node:
             rewritten += _rewrite_roles(item)
     return rewritten
+
+
+def _rewrite_states_outbound(node: Any) -> int:
+    """Walk a parsed JSON tree and rewrite TaskState values from spec
+    form (``"completed"``) to gRPC-flavor (``"TASK_STATE_COMPLETED"``).
+
+    Operates in place. Returns the count of rewrites for log breadcrumbs.
+    Reverse counterpart of the inbound role rewriter.
+    """
+    rewritten = 0
+    if isinstance(node, dict):
+        state = node.get("state")
+        if isinstance(state, str) and state in PO_TASK_STATE_REVERSE:
+            mapped = PO_TASK_STATE_REVERSE[state]
+            if mapped != state:
+                node["state"] = mapped
+                rewritten += 1
+        # Reverse-map roles too — a Message embedded under task.status.message
+        # carries ``role: "agent"`` from the spec, but PO expects ROLE_AGENT.
+        role = node.get("role")
+        if isinstance(role, str) and role in PO_ROLE_REVERSE:
+            node["role"] = PO_ROLE_REVERSE[role]
+            rewritten += 1
+        for value in node.values():
+            rewritten += _rewrite_states_outbound(value)
+    elif isinstance(node, list):
+        for item in node:
+            rewritten += _rewrite_states_outbound(item)
+    return rewritten
+
+
+def normalise_po_response(body: dict[str, Any]) -> dict[str, Any]:
+    """Translate a spec-form JSON-RPC response to PO/gRPC-flavor.
+
+    Two transformations:
+
+    1. **Wrap ``result`` in the proto oneof field.** The spec encodes
+       ``SendMessageResponse.payload`` with a ``kind`` discriminator on
+       the result object (``"task"`` or ``"message"``). The proto's
+       ``oneof payload { Task task = 1; Message message = 2; }`` puts
+       the discriminator in the field name itself. PO's deserialiser
+       looks for ``response.result.task`` (or ``.message``) and errors
+       out with ``"did not respond with a task"`` when our spec-form
+       result has the fields directly under ``result``.
+
+    2. **Reverse-map enum values.** ``state`` and ``role`` are spec-form
+       lowercase / dash-separated (``"completed"``, ``"agent"``); PO
+       expects gRPC-flavor (``"TASK_STATE_COMPLETED"``, ``"ROLE_AGENT"``).
+       Recursive walk over the wrapped result.
+
+    The ``kind`` discriminator is left intact after wrapping — PO's
+    deserialiser ignores unknown fields by default. If a future PO bump
+    starts rejecting them we can strip in a follow-up.
+
+    Returns a NEW dict; does not mutate the input. Pure function — safe
+    to unit test in isolation.
+    """
+    if not isinstance(body, dict):
+        return body  # type: ignore[unreachable]
+
+    # Only transform JSON-RPC responses with a ``result`` object. Errors
+    # (with an ``error`` field) and notifications (no result) pass through.
+    if "result" not in body:
+        return copy.deepcopy(body)
+
+    new_body = copy.deepcopy(body)
+    result = new_body.get("result")
+    if not isinstance(result, dict):
+        return new_body
+
+    # Wrap the result in the oneof field by ``kind`` discriminator.
+    kind = result.get("kind")
+    if kind == "task":
+        new_body["result"] = {"task": result}
+    elif kind == "message":
+        new_body["result"] = {"message": result}
+    # Unknown / missing kind — leave the structure as-is and let PO surface
+    # whatever error it likes. Better than guessing wrong.
+
+    # Reverse-map enum values across the wrapped tree. Counts are for
+    # logging only; we don't bail on zero rewrites because a bare error
+    # response might legitimately have no enums to rewrite.
+    rewritten = _rewrite_states_outbound(new_body.get("result"))
+    if rewritten:
+        logger.info(
+            "po_compat: rewrote outbound state/role values",
+            extra={"count": rewritten},
+        )
+
+    return new_body
 
 
 def normalise_po_payload(body: dict[str, Any]) -> dict[str, Any]:
@@ -142,21 +260,87 @@ class PoCompatMiddleware(BaseHTTPMiddleware):
             # Replay the original bytes so the SDK can return its own
             # JSON-RPC -32700 parse error.
             await self._replace_body(request, raw)
-            return await call_next(request)
+            response = await call_next(request)
+            return await self._transform_response(response)
 
         if not isinstance(body, dict):
             await self._replace_body(request, raw)
-            return await call_next(request)
+            response = await call_next(request)
+            return await self._transform_response(response)
 
         new_body = normalise_po_payload(body)
         if new_body == body:
-            # Nothing to rewrite — replay original bytes verbatim.
+            # Nothing to rewrite inbound — replay original bytes verbatim,
+            # but still transform the outbound response (PO expects
+            # gRPC-flavor regardless of what shape the request was in).
             await self._replace_body(request, raw)
-            return await call_next(request)
+            response = await call_next(request)
+            return await self._transform_response(response)
 
         new_raw = json.dumps(new_body).encode("utf-8")
         await self._replace_body(request, new_raw)
-        return await call_next(request)
+        response = await call_next(request)
+        return await self._transform_response(response)
+
+    @staticmethod
+    async def _transform_response(response: Response) -> Response:
+        """Rewrite the JSON-RPC response body from spec form to PO/gRPC-flavor.
+
+        Only acts on JSON-content responses. Streaming and non-JSON
+        responses pass through untouched (the SDK doesn't stream
+        ``message/send`` responses today, but ``message/stream`` would —
+        defer that bridge work until we see streaming traffic from PO).
+        """
+        media_type = (response.headers.get("content-type") or "").split(";")[0].strip()
+        if media_type != "application/json":
+            return response
+
+        # Read the entire response body. BaseHTTPMiddleware exposes it
+        # via ``response.body_iterator`` even for non-streaming responses.
+        chunks: list[bytes] = []
+        async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+            chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8"))
+        raw_body = b"".join(chunks)
+
+        if not raw_body:
+            return response
+
+        try:
+            parsed = json.loads(raw_body)
+        except (json.JSONDecodeError, ValueError):
+            # Hand back the original bytes — don't double-encode.
+            return Response(
+                content=raw_body,
+                status_code=response.status_code,
+                headers={
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower() != "content-length"
+                },
+                media_type=response.media_type,
+            )
+
+        if not isinstance(parsed, dict):
+            return Response(
+                content=raw_body,
+                status_code=response.status_code,
+                headers={
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower() != "content-length"
+                },
+                media_type=response.media_type,
+            )
+
+        new_parsed = normalise_po_response(parsed)
+        new_raw = json.dumps(new_parsed).encode("utf-8")
+
+        return Response(
+            content=new_raw,
+            status_code=response.status_code,
+            headers={k: v for k, v in response.headers.items() if k.lower() != "content-length"},
+            media_type=response.media_type,
+        )
 
     @staticmethod
     async def _replace_body(request: Request, body: bytes) -> None:

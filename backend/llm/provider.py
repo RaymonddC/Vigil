@@ -174,6 +174,57 @@ class ClaudeProvider(Provider):
             raise LLMError("claude", str(e)) from e
 
 
+class GeminiProvider(Provider):
+    """Google Gemini provider via httpx (no Google SDK dependency).
+
+    Uses the public ``generativelanguage.googleapis.com`` REST endpoint —
+    same API surface used by Google AI Studio and the model PO recommends
+    in its getting-started flow.
+
+    Env vars:
+        GEMINI_API_KEY: Required. Get one free at https://aistudio.google.com/apikey.
+        GEMINI_MODEL:   Model name (default ``gemini-2.5-flash-lite``).
+    """
+
+    API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def __init__(self) -> None:
+        self._api_key = os.environ.get("GEMINI_API_KEY", "")
+        self._model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        if not self._api_key:
+            raise LLMError("gemini", "GEMINI_API_KEY env var is required")
+
+    @property
+    def name(self) -> str:
+        return f"gemini/{self._model}"
+
+    async def complete(self, prompt: str, max_tokens: int = 1024) -> str:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+                resp = await client.post(
+                    f"{self.API_BASE}/{self._model}:generateContent",
+                    params={"key": self._api_key},
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"maxOutputTokens": max_tokens},
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                # Response shape: candidates[0].content.parts[0].text
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    raise LLMError("gemini", "No candidates in response")
+                parts = candidates[0].get("content", {}).get("parts") or []
+                for part in parts:
+                    if "text" in part:
+                        return part["text"]
+                raise LLMError("gemini", "No text part in response")
+        except httpx.HTTPError as e:
+            raise LLMError("gemini", str(e)) from e
+
+
 class StubProvider(Provider):
     """Fixed-template provider for CI and testing.
 
@@ -205,7 +256,7 @@ class StubProvider(Provider):
 def get_provider() -> Provider:
     """Factory: select provider from LLM_PROVIDER env var.
 
-    Env var values: "ollama" (default), "groq", "claude", "stub".
+    Env var values: "ollama" (default), "groq", "claude", "gemini", "stub".
     Falls back to Ollama if the requested provider cannot be initialized
     (e.g. missing API key).
     """
@@ -224,6 +275,13 @@ def get_provider() -> Provider:
     if provider_name == "claude":
         try:
             return ClaudeProvider()
+        except LLMError:
+            # Fallback to Ollama if key missing
+            return OllamaProvider()
+
+    if provider_name == "gemini":
+        try:
+            return GeminiProvider()
         except LLMError:
             # Fallback to Ollama if key missing
             return OllamaProvider()
