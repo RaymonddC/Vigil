@@ -13,6 +13,7 @@ Verifies that ``backend/mcp_server/synthetic_fallback.py``:
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -185,6 +186,60 @@ class TestAuthErrorDetectionDemoMode:
     def test_non_fhir_exception_does_not_trigger(self, monkeypatch) -> None:
         monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
         assert is_fhir_auth_error(ValueError("boom")) is False
+
+
+class TestUpstreamStatusLogging:
+    """is_fhir_auth_error must emit an INFO record at the boundary so
+    deployed JSON logs reveal which upstream status PO returned, regardless
+    of whether the synthetic-fallback path or the raw-error path runs.
+    The _vigil_-prefixed extras are the only shape JsonFormatter unpacks.
+    """
+
+    def test_logs_status_code_when_fallback_off(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+        exc = FhirClientError("FHIR error 403: forbidden", status_code=403)
+        with caplog.at_level(logging.INFO, logger="vigil.fhir.client"):
+            is_fhir_auth_error(exc)
+        records = [
+            r for r in caplog.records if r.name == "vigil.fhir.client"
+        ]
+        assert records, "expected at least one vigil.fhir.client log record"
+        record = records[-1]
+        assert getattr(record, "_vigil_status_code", None) == 403
+        assert getattr(record, "_vigil_synthetic_fallback_active", None) is False
+        # 403 still flips us to fallback even with the env flag off
+        # (narrow auth-shaped match).
+        assert getattr(record, "_vigil_will_fallback", None) is True
+
+    def test_logs_status_code_when_fallback_on(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        exc = FhirClientError("FHIR error 422: bad workspace", status_code=422)
+        with caplog.at_level(logging.INFO, logger="vigil.fhir.client"):
+            is_fhir_auth_error(exc)
+        records = [
+            r for r in caplog.records if r.name == "vigil.fhir.client"
+        ]
+        assert records
+        record = records[-1]
+        assert getattr(record, "_vigil_status_code", None) == 422
+        assert getattr(record, "_vigil_synthetic_fallback_active", None) is True
+        assert getattr(record, "_vigil_will_fallback", None) is True
+
+    def test_skips_log_for_non_fhir_exception(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="vigil.fhir.client"):
+            is_fhir_auth_error(ValueError("boom"))
+        records = [
+            r for r in caplog.records if r.name == "vigil.fhir.client"
+        ]
+        assert not records, (
+            "non-FHIR exceptions should short-circuit before logging"
+        )
 
 
 class TestDisclosureText:
