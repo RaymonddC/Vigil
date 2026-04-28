@@ -8,6 +8,8 @@ Reference: po-community-mcp/python/fhir_context.py, fhir_client.py
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from backend.cache import fhir_cache_get, fhir_cache_key, fhir_cache_set
@@ -19,6 +21,8 @@ from backend.fhir.models import (
     Patient,
 )
 from backend.schemas import FhirContext  # canonical definition — single source of truth
+
+_logger = logging.getLogger("vigil.fhir.client")
 
 
 class FhirClientError(Exception):
@@ -43,12 +47,35 @@ def is_fhir_auth_error(exc: BaseException) -> bool:
     When the env flag is OFF (production default), behaviour reverts to the
     original narrow 401/403 match so real FHIR-server errors still surface
     through the standard ``fhir_error`` envelope.
+
+    Emits a single ``vigil.fhir.client`` INFO record at the boundary so
+    deployed JSON logs reveal exactly which upstream status PO returned —
+    regardless of whether we end up on the synthetic-fallback path or the
+    raw-error path. Without this we have no observability into PO's
+    refusal mode.
     """
     if not isinstance(exc, FhirClientError):
         return False
     # Demo mode: any FHIR error → synthetic.
     import os
-    if os.environ.get("VIGIL_SYNTHETIC_FALLBACK", "").lower() in ("1", "true", "yes", "on"):
+    fallback_active = os.environ.get(
+        "VIGIL_SYNTHETIC_FALLBACK", ""
+    ).lower() in ("1", "true", "yes", "on")
+    decision = fallback_active or exc.status_code in (401, 403)
+    _logger.info(
+        "fhir upstream error evaluated for synthetic fallback",
+        extra={
+            "_vigil_status_code": exc.status_code,
+            # exc.args[0] embeds the URL that 4xx'd in fhir_client._get's
+            # message ("FHIR error 403: <body>"); pass through verbatim so
+            # log readers can grep for the failing path. Already redacted by
+            # the bearer-token filter on the root logger.
+            "_vigil_message": str(exc),
+            "_vigil_synthetic_fallback_active": fallback_active,
+            "_vigil_will_fallback": decision,
+        },
+    )
+    if fallback_active:
         return True
     return exc.status_code in (401, 403)
 

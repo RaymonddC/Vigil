@@ -183,7 +183,11 @@ async def run(
             if is_fhir_auth_error(exc) and is_fallback_enabled():
                 logger.warning(
                     "FHIR auth denied; using synthetic PT-007 trajectory",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 vitals = get_synthetic_observations(category="vital-signs")
                 labs = get_synthetic_observations(category="laboratory")
@@ -192,7 +196,11 @@ async def run(
             else:
                 logger.error(
                     "FHIR fetch failed for flag_sepsis_onset",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
                 output = SepsisFlagOutput(
@@ -315,10 +323,11 @@ async def run(
         logger.info(
             "flag_sepsis_onset complete",
             extra={
-                "patient_id": patient_id,
-                "sepsis_suspected": sepsis_suspected,
-                "mode": mode,
-                "criteria_count": len(criteria_met),
+                "_vigil_patient_id": patient_id,
+                "_vigil_sepsis_suspected": sepsis_suspected,
+                "_vigil_mode": mode,
+                "_vigil_criteria_count": len(criteria_met),
+                "_vigil_data_source": data_source,
             },
         )
 

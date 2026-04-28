@@ -110,7 +110,11 @@ async def run(
             if is_fhir_auth_error(exc) and is_fallback_enabled():
                 logger.warning(
                     "FHIR auth denied; using synthetic PT-007 trajectory",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 observations = get_synthetic_observations(
                     category="vital-signs"
@@ -120,7 +124,11 @@ async def run(
             else:
                 logger.error(
                     "FHIR fetch failed for score_deterioration_risk",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
                 output = RiskScoreOutput(
@@ -202,10 +210,11 @@ async def run(
         logger.info(
             "score_deterioration_risk complete",
             extra={
-                "patient_id": patient_id,
-                "qsofa_score": qsofa.score,
-                "composite_risk": composite,
-                "risk_band": band,
+                "_vigil_patient_id": patient_id,
+                "_vigil_qsofa_score": qsofa.score,
+                "_vigil_composite_risk": composite,
+                "_vigil_risk_band": band,
+                "_vigil_data_source": data_source,
             },
         )
 
