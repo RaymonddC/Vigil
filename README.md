@@ -63,27 +63,117 @@ The backend ships as a single Docker image that dispatches on the `SERVICE` env 
 
 ## Quickstart (local dev)
 
-Prerequisites: Docker, Python 3.11+ with [`uv`](https://docs.astral.sh/uv/), Node.js 20+ with `pnpm`. Optional: Ollama with `qwen2.5:7b-instruct` for offline LLM.
+Goal: a fresh clone to a passing smoke test in under 15 minutes.
+
+### Prerequisites
+
+| Tool | Why | Install |
+|---|---|---|
+| [`uv`](https://docs.astral.sh/uv/) | Python deps | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Docker + Docker Compose v2 | HAPI FHIR + Postgres | [docs.docker.com](https://docs.docker.com/get-docker/) |
+| `make` | Standard target runner | `apt install make` / `brew install make` / preinstalled |
+| `pnpm` | Frontend only — skip if you only want the agent | `npm install -g pnpm` |
+
+WSL2: enable Docker Desktop's WSL integration for your distro before continuing.
+
+### One-time setup
 
 ```bash
-make up              # HAPI FHIR R4 v7.2.0 + PostgreSQL on :8080
-make seed            # 10 synthetic patients × 6 timepoints × 4 trajectories
-make demo            # full stack: MCP :7001, A2A :9000, proxy :8000, FE :3000
+git clone https://github.com/RaymonddC/Vigil.git
+cd Vigil
+
+cp .env.example .env       # then edit — see "Configure .env" below
+uv sync                    # installs Python deps + dev extras
+(cd frontend && pnpm install)   # only needed if you'll run the dashboard
+
+make up                    # boots HAPI FHIR R4 + Postgres on :8080 (waits for healthcheck)
+make seed                  # loads 10 synthetic patients into HAPI
 ```
 
-Then open [http://localhost:3000](http://localhost:3000) for the dashboard, or POST to `http://localhost:9000/` for the A2A JSON-RPC entrypoint.
+#### Configure `.env`
 
-To run pieces individually in separate terminals:
+The minimum a fresh clone needs:
+
+| Variable | Pick this for the fastest path |
+|---|---|
+| `VIGIL_API_KEY` | Any non-empty string for local dev (e.g. `local-dev-key-anything`). Required by compose; the middleware enforces it on `mcp` / `a2a` / `api`. |
+| `LLM_PROVIDER` | `gemini` (free key from [aistudio.google.com](https://aistudio.google.com/apikey), one paste) — or `stub` for zero-LLM CI mode, `ollama` for fully offline, `groq` / `claude` if you have those keys. |
+| `GEMINI_API_KEY` | Set this if `LLM_PROVIDER=gemini`. Same idea for `GROQ_API_KEY` / `ANTHROPIC_API_KEY` / `OLLAMA_BASE_URL`. |
+| `VIGIL_SYNTHETIC_FALLBACK` | Leave `false` for production posture. Set `true` if you want the demo crutch where bundled PT-007 data renders when the upstream FHIR server returns 401/403. |
+
+### Run the stack — pick one
+
+**A. Full demo (dashboard + agent + everything).** One command:
 
 ```bash
-make mcp             # MCP server on :7001
-make agent           # A2A agent on :9000
-make proxy           # FastAPI proxy on :8000
-make frontend        # Next.js dev server on :3000
-make demo-stop       # tear it all down
+make demo                  # orchestrated startup with health checks (~1–2 min on warm Docker)
+# → Dashboard:  http://localhost:3000
+# → Agent card: http://localhost:9000/.well-known/agent-card.json
+# → Stop:       make demo-stop && make down
 ```
 
-LLM provider is swapped via the `LLM_PROVIDER` env var: `ollama` (dev default), `groq`, `claude` (for the demo recording), or `stub` (CI). Provider-specific extras are opt-in via `pyproject.toml`.
+**B. Hackathon submission only (just the A2A agent + MCP).** The dashboard isn't needed for the marketplace path. In two terminals (or with tmux / `&`):
+
+```bash
+make mcp                   # FastMCP tool server on :7001
+make agent                 # A2A agent on :9000 (AgentCard at /.well-known/agent-card.json)
+```
+
+`make mcp` and `make agent` do **not** auto-source `.env` — they pick up env vars from the calling shell. Either `export` them first, or run inline:
+
+```bash
+export VIGIL_API_KEY=local-dev-key-anything
+export LLM_PROVIDER=gemini GEMINI_API_KEY=...
+make mcp & make agent
+```
+
+**C. Docker compose (closer to production).** Brings up the whole stack in containers behind Caddy:
+
+```bash
+docker compose up -d --build      # set SITE_DOMAIN in .env first if you want auto-TLS
+```
+
+### Verify
+
+```bash
+# 1. Agent card serves
+curl -s http://localhost:9000/.well-known/agent-card.json | jq .name
+#  → "Vigil — Postop & Postpartum Sentinel"
+
+# 2. End-to-end JSON-RPC smoke (uses scripts/smoke_po.sh under the hood)
+make smoke
+#  → result.status.state = "completed", parts[0].text = a screen_vitals one-liner
+
+# 3. Pytest
+make test
+```
+
+Skill list, IDs, and parameter shapes are advertised live on the agent card — see `/.well-known/agent-card.json` rather than hardcoded docs.
+
+### Expose to Prompt Opinion's launchpad (optional)
+
+Only needed if you want PO's hosted chat to call your local agent. Skip for self-hosted testing.
+
+```bash
+# Cloudflared quick-tunnel (no signup). No-sudo install:
+curl -L --output ~/.local/bin/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x ~/.local/bin/cloudflared
+
+export VIGIL_API_KEY=local-dev-key-anything
+bash scripts/tunnel-cf.sh         # or scripts/tunnel.sh for ngrok (needs `ngrok config add-authtoken`)
+```
+
+After the script prints a public `https://...trycloudflare.com` URL, restart the agent with `A2A_PUBLIC_URL=https://<that-host>/a2a` so the AgentCard advertises the public URL, then register that URL on [app.promptopinion.ai](https://app.promptopinion.ai). See `docs/PO_PUBLISHING_RESEARCH.md` and `docs/PROMPT_OPINION_INTEGRATION.md` for the current PO menu paths.
+
+### Common pitfalls
+
+- **`make mcp` / `make agent` don't read `.env`.** Either `export` env vars in your shell or set them inline on the command (e.g. `LLM_PROVIDER=gemini GEMINI_API_KEY=... make agent`).
+- **`screen_vitals` reports 0 observations.** Patient JSON has absolute timestamps; if HAPI was seeded long ago, MEWT's recent-window filter empties out. Re-run `make seed`.
+- **Next.js 16 and `pnpm build`.** Pages that fetch from the backend during render must export `const dynamic = "force-dynamic"`. Already set on the relevant pages — don't strip it, or `pnpm build` will hang.
+- **`cloudflared` / `ngrok` aren't bundled.** Use the no-sudo install above, or grab the package from each project's release page.
+
+For the long-form contributor walkthrough — manual 6-terminal startup, troubleshooting matrix, test taxonomy — see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 ## Repo map
 

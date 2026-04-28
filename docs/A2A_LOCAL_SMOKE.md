@@ -7,6 +7,15 @@ End-to-end smoke against a freshly restarted local stack. Verifies the
 v1 wire-form agent card, the new 5-skill dispatch path, and the three
 documented graceful-failure modes. No source code or tests changed.
 
+> **This is a historical audit report, not a how-to.** For instructions on
+> running smoke tests yourself, see `make smoke` (one JSON-RPC round-trip
+> against the agent — knobs documented in the [`Makefile`](../Makefile))
+> and the Quickstart in [`README.md`](../README.md). Long-form developer
+> setup lives in [`DEVELOPMENT.md`](DEVELOPMENT.md). The findings below
+> reflect the state of the branch on 2026-04-26 and are kept as an audit
+> trail; live skill counts and IDs are advertised on the agent card at
+> `/.well-known/agent-card.json`.
+
 ---
 
 ## Method

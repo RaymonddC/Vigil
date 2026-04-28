@@ -1,26 +1,32 @@
 # Development Guide
 
-> Everything a new contributor needs to go from `git clone` to a running Vigil stack. Self-contained — no other docs required to get started.
+> Long-form companion to the `README.md` Quickstart. Read the README first to get a stack running; come back here when you need manual control, deeper troubleshooting, or the full test / lint / e2e flow.
 
 ---
 
-## 1. Prerequisites
+## 1. Prerequisites (full matrix)
 
-| Tool | Version | Install |
+The README lists the bare minimum. If you plan to do real development (backend changes, frontend work, e2e tests), you'll want:
+
+| Tool | Version | Notes / install |
 |---|---|---|
 | **Docker + Docker Compose** | v24+ / v2+ | [docs.docker.com](https://docs.docker.com/get-docker/) |
-| **Python** | 3.11+ | [python.org](https://www.python.org/downloads/) |
-| **uv** (Python package manager) | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| **Node.js** | 20+ | [nodejs.org](https://nodejs.org/) |
+| **Python** | 3.11+ | Managed by `uv`; you don't need a separate `python` install |
+| **uv** | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| **Node.js** | 20+ | For the dashboard and Playwright |
 | **pnpm** | 9+ | `npm install -g pnpm` |
+| **make** | any | Standard target runner |
+| **jq** | any | Pretty-printing JSON in smoke tests; optional |
+| **Ollama** | latest | Optional — only when `LLM_PROVIDER=ollama` |
+| **cloudflared** or **ngrok** | latest | Optional — only when exposing the agent to Prompt Opinion's launchpad |
 
 **Tested on:** macOS (ARM/Intel), Ubuntu 22.04, Windows 11 via WSL2.
 
-> **WSL2 users:** Make sure Docker Desktop has the WSL2 integration enabled for your distro. Check with `docker ps` from your WSL shell — if it errors, open Docker Desktop > Settings > Resources > WSL Integration.
+> **WSL2 users:** open Docker Desktop > Settings > Resources > WSL Integration and enable your distro. Verify with `docker ps` from your WSL shell.
 
 ---
 
-## 2. Clone and initial setup
+## 2. Clone, sync, configure
 
 ```bash
 git clone https://github.com/RaymonddC/Vigil.git
@@ -30,10 +36,18 @@ cd Vigil
 ### 2.1 Backend dependencies
 
 ```bash
-uv sync --all-extras
+uv sync
 ```
 
-This installs all Python dependencies including dev tools (pytest, ruff, mypy) and all LLM provider extras (ollama, groq, anthropic). The lockfile (`uv.lock`) ensures reproducible builds.
+This installs runtime + `[dev]` extras (pytest, ruff, mypy). LLM-provider extras (`ollama`, `groq`, `anthropic`) are opt-in via `--extra`:
+
+```bash
+uv sync --extra ollama          # only if you'll run a local Ollama
+uv sync --extra groq            # only if LLM_PROVIDER=groq
+uv sync --extra anthropic       # only if LLM_PROVIDER=claude
+```
+
+Gemini and the stub provider need no extras — Gemini uses raw `httpx` to keep the dep tree light.
 
 ### 2.2 Frontend dependencies
 
@@ -41,352 +55,362 @@ This installs all Python dependencies including dev tools (pytest, ruff, mypy) a
 cd frontend && pnpm install && cd ..
 ```
 
+Skip if you only care about the agent submission path.
+
 ### 2.3 Environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` — key variables:
+Key knobs:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LLM_PROVIDER` | `ollama` | `ollama` / `groq` / `claude` / `stub` |
+| `VIGIL_API_KEY` | — | **Required** for compose; any non-empty string in dev. The middleware enforces it on the `mcp`, `a2a`, and `api` services. If unset, enforcement is disabled and a warning is logged. |
+| `LLM_PROVIDER` | `ollama` | One of `ollama` / `groq` / `claude` / `gemini` / `stub`. `stub` returns canned text — perfect for CI and pipeline-only debugging. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Only when `LLM_PROVIDER=ollama` |
 | `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Only when `LLM_PROVIDER=ollama` |
-| `GROQ_API_KEY` | (empty) | Get at [console.groq.com](https://console.groq.com) |
-| `ANTHROPIC_API_KEY` | (empty) | Get at [console.anthropic.com](https://console.anthropic.com) |
-| `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Overridden by SHARP headers in production |
-| `POLL_INTERVAL_SEC` | `900` | Agent polling: 900 = 15 min, 30 = fast demo |
-| `FHIR_BACKEND` | `hapi` | Use `hapi` for live FHIR |
-| `VIGIL_API_KEY` | (empty) | Optional: if set, all services require X-API-Key |
-| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
+| `GEMINI_API_KEY` | — | Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Same model PO uses by default. |
+| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | |
+| `GROQ_API_KEY` | — | [console.groq.com](https://console.groq.com) |
+| `ANTHROPIC_API_KEY` | — | [console.anthropic.com](https://console.anthropic.com) |
+| `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Overridden by SHARP headers when called via Prompt Opinion |
+| `VIGIL_SYNTHETIC_FALLBACK` | `false` | When `true`, MCP tools fall back to bundled PT-007 data if the upstream FHIR server 401/403s. Useful for demo recordings; keep `false` in any production-shaped deploy. |
+| `POLL_INTERVAL_SEC` | `900` | Sentinel polling: 900 = 15 min. Set `30` for fast demo, `0` to disable autonomous polling (the Option 3 deploy default). |
+| `FHIR_BACKEND` | `hapi` | Use `hapi` for live FHIR, `fixture` for the in-memory synthetic fallback. |
+| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated. Only relevant when running compose with a `SITE_DOMAIN`. |
+| `A2A_PUBLIC_URL` | (derived) | Override the URL the AgentCard advertises (e.g. when you've fronted the agent with a tunnel). |
 
-The frontend `.env.local` is already configured:
+The frontend also reads `frontend/.env.local`:
 
 ```bash
-# frontend/.env.local — already present, no changes needed
+# frontend/.env.local — already present
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
 ### 2.4 LLM setup (choose one)
 
-**Option A: Ollama (recommended for dev — free, no API key)**
+**A. Stub mode — no LLM at all.** Fastest path; tools return canned templates. Good enough to verify dispatch and the rule engines.
 
 ```bash
-# Install Ollama: https://ollama.com/download
-ollama pull qwen2.5:7b-instruct
-ollama serve  # leave running in a terminal
-```
-
-**Option B: Stub mode (no LLM needed at all)**
-
-```bash
-# In .env:
+# .env
 LLM_PROVIDER=stub
-# Tools return fixed responses. Good for testing the pipeline without LLM latency.
 ```
 
-**Option C: Groq or Claude (cloud)**
+**B. Gemini — easiest free cloud option.** Same provider Prompt Opinion uses by default.
 
 ```bash
-# In .env, set the provider and API key:
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_...
-# or:
-LLM_PROVIDER=claude
-ANTHROPIC_API_KEY=sk-ant-...
+# .env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
 ```
+
+**C. Ollama — fully offline.**
+
+```bash
+ollama pull qwen2.5:7b-instruct
+ollama serve                       # leave running
+
+# .env
+LLM_PROVIDER=ollama
+```
+
+**D. Groq / Claude.** Set `LLM_PROVIDER=groq` (or `claude`) and the matching API key in `.env`.
 
 ---
 
 ## 3. Start services
 
-### Option A: One-command startup
+### Option A: One command (`make demo`)
+
+The default path. Starts HAPI, seeds patients, then launches MCP / A2A / proxy / frontend in the background with health checks:
 
 ```bash
-make demo
+make demo                          # ~1–2 minutes on a warm Docker pull
+make demo-stop && make down        # full teardown (Docker + background processes)
 ```
 
-This runs `scripts/demo.sh`, which starts all services in order with health checks. Takes ~1–2 minutes on a warm Docker pull. When you see `=== All services running ===`, everything is ready.
+Logs live in `.demo-logs/`; PIDs in `.demo-pids/`.
 
-To stop everything:
+### Option B: Manual six-terminal startup
+
+When you want each service's stdout in its own pane:
+
+| Terminal | Command | What it runs |
+|---|---|---|
+| 1 | `make up` | HAPI FHIR + Postgres on `:8080`, waits for the metadata endpoint |
+| 2 | `make seed` | 10 synthetic patients (PT-001..PT-010) into HAPI; one-shot |
+| 3 | `make mcp` | FastMCP server on `:7001` |
+| 4 | `make agent` | A2A agent on `:9000`, AgentCard at `/.well-known/agent-card.json` |
+| 5 | `make proxy` | FastAPI proxy on `:8000` (dashboard backend + approve endpoint) |
+| 6 | `make frontend` | Next.js dev server on `:3000` |
+
+> **Important:** `make mcp` / `make agent` / `make proxy` do **not** auto-source `.env`. Export the env vars you need in each shell, or set them inline:
+>
+> ```bash
+> LLM_PROVIDER=gemini GEMINI_API_KEY=... VIGIL_API_KEY=local-dev-key-anything make agent
+> ```
+>
+> The full `make demo` script does the same — its child processes inherit whatever's in the launching shell's environment.
+
+### Option C: Docker compose
+
+Closest to the production EC2 deploy. All four services + HAPI + Caddy in containers:
 
 ```bash
-make demo-stop
+# Optional: set SITE_DOMAIN in .env if you want Caddy to issue a real cert
+docker compose up -d --build
+docker compose logs -f a2a         # follow the agent
+docker compose down
 ```
 
-### Option B: Manual startup (6 terminals)
-
-If you want to see each service's output, start them in separate terminals:
-
-**Terminal 1 — HAPI FHIR (Docker)**
-
-```bash
-make up
-# Waits for HAPI FHIR to be healthy at http://localhost:8080/fhir
-```
-
-HAPI takes 30–60 seconds to start. Wait for the "HAPI FHIR ready" message.
-
-**Terminal 2 — Seed synthetic patients**
-
-```bash
-make seed
-```
-
-Loads 10 synthetic patients (PT-001 through PT-010) with 6 timepoints each across 4 trajectories: stable, deteriorating, sepsis onset, and postpartum hemorrhage.
-
-**Terminal 3 — MCP server (:7001)**
-
-```bash
-make mcp
-```
-
-Starts the FastMCP server with 4 clinical tools on `http://localhost:7001`.
-
-**Terminal 4 — A2A agent (:9000)**
-
-```bash
-make agent
-```
-
-Starts the Postop Sentinel agent. Agent card at `http://localhost:9000/.well-known/agent-card.json`.
-
-**Terminal 5 — FastAPI proxy (:8000)**
-
-```bash
-make proxy
-```
-
-The proxy bridges the frontend to HAPI FHIR and the agent. Handles the approve endpoint that writes FHIR Communication + AuditEvent resources.
-
-**Terminal 6 — Next.js frontend (:3000)**
-
-```bash
-make frontend
-```
-
-Opens the clinician dashboard at `http://localhost:3000`.
+Compose binds HAPI to `127.0.0.1:8080` only (SEC-10) — it's not reachable from outside the host. Public traffic goes through Caddy on `:80` / `:443`.
 
 ---
 
 ## 4. Verify everything works
 
-Open [http://localhost:3000](http://localhost:3000) in your browser (Chrome recommended, 110% zoom for best demo legibility).
+### Smoke tests
 
-### Checklist
+```bash
+# Agent card
+curl -s http://localhost:9000/.well-known/agent-card.json | jq .name
+#  → "Vigil — Postop & Postpartum Sentinel"
+
+# JSON-RPC SendMessage round-trip (the same shape Prompt Opinion uses)
+make smoke
+make smoke SKILL=draft_sbar PATIENT=PT-007
+make smoke SKILL=check_sepsis
+
+# Health endpoints
+curl http://localhost:7001/health       # MCP
+curl http://localhost:8000/api/health   # FastAPI proxy
+```
+
+The live skill list (IDs, parameter shapes, FHIR-context extension) is advertised on the AgentCard — don't hardcode it in test scripts; fetch it.
+
+### Dashboard checklist
+
+Open <http://localhost:3000> (Chrome at 110% zoom for demo legibility):
 
 | Step | What to check | Expected |
 |---|---|---|
-| Landing page | `http://localhost:3000` | Hero stats (4.2M, 260K), 4 feature cards |
-| Patient roster | `/patients` | 10 rows sorted by risk, filter pills (All / High+ / Triggered) |
-| Stable patient | Click PT-001 | Green "Normal" RiskBadge, flat vitals chart, no alerts |
-| Deteriorating patient | Click PT-007 | Red/amber trend in vitals chart, high risk badge, qSOFA score |
-| Sepsis patient | Click PT-009 | "Critical" badge, SBAR panel with S/B/A/R sections |
-| Agent timeline | `/timeline` | Tool-call events (SCREENING, RISK_SCORING, etc.), "Tick Now" button |
-| Review queue | `/alerts` | SBAR alert cards with "Approve & send RRT" button |
-| System status | `/settings` | LLM provider, FHIR health (green), SHARP headers |
+| Landing | `/` | Hero stats and feature cards render |
+| Roster | `/patients` | 10 rows sorted by deterioration risk; All / High+ / Triggered filters work |
+| Stable patient | Click PT-001 | Green badge, flat vitals chart, no alerts |
+| Deteriorating | Click PT-007 | Amber/red trend, qSOFA score visible |
+| Sepsis | Click PT-009 | Critical badge, SBAR S/B/A/R sections render |
+| Timeline | `/timeline` | Tool-call events, "Tick Now" button |
+| Review queue | `/alerts` | SBAR alert cards with "Approve & send RRT" |
+| System status | `/settings` | LLM provider, FHIR health, SHARP headers |
 
-### Trigger a manual tick
-
-The agent polls on a timer, but you can trigger a screening cycle immediately:
+### Trigger a manual sentinel tick
 
 ```bash
-# From the UI: click "Tick Now" on the Timeline page
-# Or via curl:
 curl -X POST http://localhost:8000/api/agent/tick
+# Or click "Tick Now" on /timeline
 ```
 
 ### Test the approve flow
 
-1. Go to `/alerts` (Review Queue)
-2. Click "Approve & send RRT" on any alert card
-3. A Sonner toast should confirm: "Communication {id} written — audit {id}"
-4. Check HAPI FHIR for the new resources:
+1. `/alerts` → "Approve & send RRT" on any card.
+2. Sonner toast confirms `Communication {id} written — audit {id}`.
+3. Verify against HAPI:
    ```bash
-   curl http://localhost:8080/fhir/Communication?_sort=-_lastUpdated&_count=1 | python -m json.tool
+   curl -s "http://localhost:8080/fhir/Communication?_sort=-_lastUpdated&_count=1" | jq .
    ```
+
+The proxy's approve endpoint is the **only** code path that writes back to FHIR — the agent never writes autonomously.
 
 ---
 
-## 5. Run tests
-
-### Backend tests (pytest)
+## 5. Tests, lint, e2e
 
 ```bash
-uv run pytest               # 312 tests
-uv run pytest -v --tb=short # verbose with short tracebacks
-uv run pytest -x            # stop on first failure
-uv run pytest -k "sepsis"   # run only sepsis-related tests
+make test                          # full pytest (asyncio_mode=auto)
+make lint                          # ruff check backend/ tests/
+make typecheck                     # mypy — opt-in; known FastMCP Context false positives
+make ci                            # lint + test
 ```
 
-Key test files: `test_criteria.py` (MEWT/qSOFA/SIRS/KDIGO rules), `test_sharp_compliance.py` (39 SHARP tests), `test_b2_*`/`test_b3_*`/`test_flag_*`/`test_generate_*` (per-tool), `tests/integration/test_mcp_tools.py` (full chain).
-
-### Linting
+Useful filters:
 
 ```bash
-make lint
-# Runs:
-#   uv run ruff check backend/ tests/
-#   uv run mypy backend/
+uv run pytest -k "sepsis" -v
+uv run pytest tests/integration/ -v
+uv run pytest tests/test_sharp_compliance.py::test_extract_metadata -v
+uv run pytest -x                   # stop on first failure
+uv run pytest --tb=short
 ```
 
-### E2E tests (Playwright)
+### Playwright e2e
 
 ```bash
-# First time — install browsers:
+# First time — install browsers
 cd frontend && pnpm exec playwright install --with-deps chromium && cd ..
 
-# Run (requires make demo to be running):
+# Requires `make demo` to be running first
 make e2e
 ```
 
-### All quality checks
+---
+
+## 6. Exposing the agent to Prompt Opinion
+
+Optional. Only needed when you want PO's hosted launchpad to chat with your local agent.
+
+### Cloudflared (no signup)
 
 ```bash
-make ci   # runs lint + test
+# No-sudo install
+curl -L --output ~/.local/bin/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x ~/.local/bin/cloudflared
+
+export VIGIL_API_KEY=local-dev-key-anything
+bash scripts/tunnel-cf.sh
 ```
+
+The script tunnels `:8000` (proxy), `:7001` (MCP), and `:9000` (agent) and prints public `https://*.trycloudflare.com` URLs. HAPI (`:8080`) is never tunneled (SEC-10).
+
+### ngrok
+
+```bash
+ngrok config add-authtoken <token>
+export VIGIL_API_KEY=local-dev-key-anything
+bash scripts/tunnel.sh
+```
+
+### After the tunnel is up
+
+1. Restart the agent with `A2A_PUBLIC_URL=https://<a2a-tunnel-host>/a2a` so the AgentCard advertises the public URL.
+2. Register that URL on [app.promptopinion.ai](https://app.promptopinion.ai). See `docs/PO_PUBLISHING_RESEARCH.md` and `docs/PROMPT_OPINION_INTEGRATION.md` for the current PO menu paths.
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 ### HAPI FHIR won't start
 
 ```bash
-# Check Docker is running:
-docker ps
-
-# Check container logs:
-docker compose logs hapi
-
-# Common issues:
-# - WSL2: Docker Desktop WSL integration not enabled
-# - Port 8080 already in use: lsof -i :8080
-# - First cold pull of hapiproject/hapi:v7.2.0 takes ~2 min
+docker ps                          # is Docker running?
+docker compose logs hapi           # what's HAPI saying?
+lsof -i :8080                      # port already in use?
 ```
+
+WSL2 cold-pulls of `hapiproject/hapi:v7.2.0` take ~2 minutes the first time.
 
 ### LLM errors / "provider not configured"
 
+Switch to stub mode for a no-LLM smoke:
+
 ```bash
-# Option 1: Use stub mode (no LLM needed):
 echo "LLM_PROVIDER=stub" >> .env
-
-# Option 2: Install and run Ollama:
-ollama pull qwen2.5:7b-instruct
-ollama serve
-# Verify: curl http://localhost:11434/api/tags
-
-# Option 3: Use Groq (fast, free tier):
-# Get key at https://console.groq.com
-echo "LLM_PROVIDER=groq" >> .env
-echo "GROQ_API_KEY=gsk_..." >> .env
 ```
+
+Or check the matching key is set: `LLM_PROVIDER=gemini` needs `GEMINI_API_KEY`, `groq` needs `GROQ_API_KEY`, `claude` needs `ANTHROPIC_API_KEY`, `ollama` needs `ollama serve` running.
 
 ### Port conflicts
 
 ```bash
-# Check what's using the ports:
-lsof -i :7001 -i :8000 -i :8080 -i :9000 -i :3000
-
-# Kill a specific port:
-kill $(lsof -ti :8000)
+lsof -i :3000 -i :7001 -i :8000 -i :8080 -i :9000
+kill $(lsof -ti :8000)             # nuke whatever's on :8000
 ```
 
 ### Frontend TypeScript errors
 
 ```bash
 cd frontend
-pnpm install          # reinstall deps
-pnpm tsc --noEmit     # check for type errors without building
-pnpm dev              # restart dev server
+pnpm install
+pnpm tsc --noEmit
+pnpm dev
 ```
 
-### Seed data not showing up
+Pages that fetch from the backend during RSC render export `const dynamic = "force-dynamic"`. Don't strip those exports — `pnpm build` will hang on static prerendering otherwise.
+
+### Seed data missing
 
 ```bash
 make seed
-# Verify: curl http://localhost:8080/fhir/Patient?_count=0 | python -m json.tool | grep total
-# Should show: "total": 10
+curl -s "http://localhost:8080/fhir/Patient?_count=0" | jq '.total'   # expect 10
 ```
+
+Patient JSON files use absolute timestamps. If HAPI was seeded long ago, MEWT's recent-window filter may report 0 observations — re-run `make seed` to refresh.
 
 ### "Backend unavailable" in the dashboard
 
-The frontend talks to the FastAPI proxy on `:8000`. Make sure it's running: `make proxy` then verify with `curl http://localhost:8000/api/health`.
+The frontend talks to the FastAPI proxy on `:8000`. Make sure it's running: `make proxy`, then verify with `curl http://localhost:8000/api/health`.
+
+### Agent returns "MCP tool was unreachable: HTTP 401"
+
+The agent forwards `VIGIL_API_KEY` to MCP only if it's set in the agent's environment. If you've set `VIGIL_API_KEY` for MCP but not for the agent process, MCP will 401 every call. Either set it on both, or unset it on both for local dev.
 
 ---
 
-## 7. Architecture overview
+## 8. Architecture (quick map)
 
 ```
-                    ┌─────────────────────────┐
-                    │  Next.js 15 Dashboard   │  :3000
-                    │  (shadcn + Recharts)    │
-                    └───────────┬─────────────┘
-                                │ /api/*
-                    ┌───────────▼─────────────┐
-                    │  FastAPI Proxy          │  :8000
-                    │  (FHIR reads + approve) │
-                    └──┬────────────────┬─────┘
-                       │                │
-          ┌────────────▼──┐    ┌───────▼──────────┐
-          │ HAPI FHIR R4  │    │ A2A Sentinel     │  :9000
-          │ + PostgreSQL  │    │ (7-state machine)│
-          │               │    └───────┬──────────┘
-          │  :8080        │            │ MCP tool calls
-          │               │    ┌───────▼──────────┐
-          └───────────────┘    │ MCP Server       │  :7001
-                               │ (4 clinical      │
-                               │  tools)          │
-                               └──────────────────┘
+                    Prompt Opinion launchpad
+                              │
+                       A2A JSON-RPC + SHARP
+                              │
+                              ▼
+   Clinician ─HTTPS─► Next.js dashboard ─► FastAPI proxy ─► A2A agent (:9000)
+                          (:3000)            (:8000)               │
+                                                            MCP Streamable HTTP
+                                                                   ▼
+                                                           MCP server (:7001)
+                                                                   │
+                                                                   ▼
+                                                            HAPI FHIR R4 (:8080)
 ```
-
-**Service ports:**
 
 | Service | Port | Purpose |
 |---|---|---|
-| HAPI FHIR | `:8080` | FHIR R4 server (Docker, PostgreSQL backend) |
-| MCP Server | `:7001` | 4 clinical tools via streamable HTTP |
-| A2A Agent | `:9000` | Postop Sentinel state machine |
-| FastAPI Proxy | `:8000` | Bridges frontend to FHIR + agent |
+| HAPI FHIR | `:8080` | FHIR R4, Postgres-backed |
+| MCP server | `:7001` | Clinical tools via streamable HTTP |
+| A2A agent | `:9000` | Public submission surface; AgentCard at `/.well-known/agent-card.json` |
+| FastAPI proxy | `:8000` | Dashboard backend + clinician approve write path |
 | Next.js | `:3000` | Clinician dashboard |
 
-For the full architecture — component diagram, sequence diagrams, data flow narratives, and tech stack rationale — see [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
+Full architecture, sequence diagrams, and tech stack rationale: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 
-## 8. Useful commands
+## 9. Useful commands
 
 | Command | What it does |
 |---|---|
-| `make demo` | Start everything with health checks |
+| `make demo` | Orchestrated startup with health checks |
 | `make demo-stop` | Stop all background services |
-| `make demo-warmup` | Pre-flight: reseed, ping LLM, tick agent |
-| `make up` / `make down` | Docker (HAPI + postgres) |
+| `make demo-warmup` | Reseed, ping LLM, tick agent, warm frontend routes |
+| `make up` / `make down` | HAPI + Postgres only |
 | `make seed` | Load synthetic patients |
-| `make mcp` | MCP server on :7001 |
-| `make agent` | A2A agent on :9000 |
-| `make proxy` | FastAPI proxy on :8000 |
-| `make frontend` | Next.js on :3000 |
-| `make test` | 312 pytest tests |
-| `make lint` | ruff + mypy |
+| `make mcp` | MCP server on `:7001` |
+| `make agent` | A2A agent on `:9000` |
+| `make proxy` | FastAPI proxy on `:8000` |
+| `make frontend` | Next.js dev server on `:3000` |
+| `make smoke` | JSON-RPC SendMessage to the agent (knobs: `SKILL`, `PATIENT`, `AGENT`, `FHIR_URL`) |
+| `make test` | pytest |
+| `make lint` | ruff |
+| `make typecheck` | mypy (opt-in) |
 | `make ci` | lint + test |
-| `make e2e` | Playwright (requires demo running) |
+| `make e2e` | Playwright (requires `make demo` running) |
 
 ```bash
 # Inspect FHIR data
-curl http://localhost:8080/fhir/Patient | python -m json.tool
-curl http://localhost:8080/fhir/Observation?patient=PT-007&_sort=-date&_count=3 | python -m json.tool
+curl -s http://localhost:8080/fhir/Patient | jq .
+curl -s "http://localhost:8080/fhir/Observation?patient=PT-007&_sort=-date&_count=3" | jq .
 
 # Inspect agent
-curl http://localhost:9000/.well-known/agent-card.json | python -m json.tool
+curl -s http://localhost:9000/.well-known/agent-card.json | jq .
 curl -X POST http://localhost:8000/api/agent/tick
 ```
 
 ---
 
-## 9. Commit conventions
+## 10. Commit conventions
 
 ```bash
 git commit -m "feat(B3): add qSOFA trend scoring"
@@ -396,9 +420,10 @@ git commit -m "feat(B3): add qSOFA trend scoring"
 **Types:** `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
 
 **Scopes:**
+
 - `B1`–`B8` — backend tasks
 - `FE1`–`FE6` — frontend tasks
 - `I1`–`I3` — integration tasks
 - `P1`–`P4` — documentation / submission tasks
 
-See the full task map in [`docs/BUILD_PLAN.md`](BUILD_PLAN.md).
+Full task map: [`docs/BUILD_PLAN.md`](BUILD_PLAN.md).
