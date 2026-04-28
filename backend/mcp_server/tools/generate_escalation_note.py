@@ -384,7 +384,11 @@ async def run(
             if is_fhir_auth_error(exc) and is_fallback_enabled():
                 logger.warning(
                     "FHIR auth denied; using synthetic PT-007 demographics",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 data_source = SYNTHETIC_DATA_SOURCE
                 synthetic_patient = get_synthetic_patient()
@@ -401,7 +405,11 @@ async def run(
             else:
                 logger.warning(
                     "FHIR context fetch failed, proceeding with defaults",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
 
         severity = _determine_severity(
@@ -443,7 +451,10 @@ async def run(
         except LLMError as exc:
             logger.error(
                 "LLM call failed for generate_escalation_note",
-                extra={"patient_id": patient_id, "error": str(exc)},
+                extra={
+                    "_vigil_patient_id": patient_id,
+                    "_vigil_error": str(exc),
+                },
             )
             ctx["status"] = ToolStatus.LLM_UNAVAILABLE
             # Return a template-based fallback
@@ -499,9 +510,10 @@ async def run(
         logger.info(
             "generate_escalation_note complete",
             extra={
-                "patient_id": patient_id,
-                "severity": severity,
-                "model_used": model_used,
+                "_vigil_patient_id": patient_id,
+                "_vigil_severity": severity,
+                "_vigil_model_used": model_used,
+                "_vigil_data_source": data_source,
             },
         )
 

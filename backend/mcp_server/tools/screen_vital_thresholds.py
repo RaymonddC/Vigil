@@ -76,7 +76,11 @@ async def run(
             if is_fhir_auth_error(exc) and is_fallback_enabled():
                 logger.warning(
                     "FHIR auth denied; using synthetic PT-007 trajectory",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 observations = get_synthetic_observations(
                     category="vital-signs"
@@ -85,7 +89,11 @@ async def run(
             else:
                 logger.error(
                     "FHIR fetch failed for screen_vital_thresholds",
-                    extra={"patient_id": patient_id, "error": str(exc)},
+                    extra={
+                        "_vigil_patient_id": patient_id,
+                        "_vigil_status_code": getattr(exc, "status_code", None),
+                        "_vigil_error": str(exc),
+                    },
                 )
                 ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
                 output = ScreenVitalsOutput(
@@ -108,10 +116,11 @@ async def run(
         logger.info(
             "screen_vital_thresholds complete",
             extra={
-                "patient_id": patient_id,
-                "scanned": len(vitals),
-                "breaches": len(result.breaches),
-                "triggered": result.triggered,
+                "_vigil_patient_id": patient_id,
+                "_vigil_scanned": len(vitals),
+                "_vigil_breaches": len(result.breaches),
+                "_vigil_triggered": result.triggered,
+                "_vigil_data_source": data_source,
             },
         )
 
