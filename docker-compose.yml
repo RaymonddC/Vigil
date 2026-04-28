@@ -114,6 +114,13 @@ services:
       # Without the PO entry the agent's MCP tools 403 with ssrf_blocked when invoked
       # via the launchpad — empirically verified end-to-end against PO 2026-04-27.
       ALLOWED_FHIR_HOSTS: http://hapi:8080/fhir,http://localhost:8080/fhir,https://app.promptopinion.ai
+      # Demo crutch — when ON (true), any FhirClientError trips the bundled
+      # PT-007 trajectory so the launchpad always renders a clinically
+      # coherent response. Without this propagated into the container, the
+      # .env value only affects local dev and the deployed agent surfaces a
+      # raw `fhir_unavailable` envelope to PO. See backend/fhir/client.py
+      # ::is_fhir_auth_error and backend/mcp_server/synthetic_fallback.py.
+      VIGIL_SYNTHETIC_FALLBACK: ${VIGIL_SYNTHETIC_FALLBACK:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://${SITE_DOMAIN:-localhost}}
       CACHE_TTL_SEC: "300"
       LOG_LEVEL: INFO
@@ -145,6 +152,11 @@ services:
       # /a2a suffix lines up with the Caddyfile's `handle /a2a*` route —
       # external A2A callers hit this URL directly from the AgentCard.
       A2A_PUBLIC_URL: ${A2A_PUBLIC_URL:-https://${SITE_DOMAIN:-localhost}/a2a}
+      # Demo crutch — see the matching note on the mcp service. The agent
+      # container also reads this flag because escalation-note generation
+      # falls back to PT-007 demographics when FHIR is unreachable; without
+      # it propagated here, only half the pipeline degrades gracefully.
+      VIGIL_SYNTHETIC_FALLBACK: ${VIGIL_SYNTHETIC_FALLBACK:-false}
       POLL_INTERVAL_SEC: "900"
       # Persist the SBAR review queue on a named volume so it survives
       # rebuilds and doesn't need a writable /app/backend/api/ directory.
