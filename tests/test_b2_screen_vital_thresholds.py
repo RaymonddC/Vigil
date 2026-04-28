@@ -18,6 +18,7 @@ import pytest
 
 from backend.fhir.client import FhirClientError
 from backend.fhir.models import CategoryItem, CodeableConcept, Coding, Observation, Quantity
+from backend.mcp_server import synthetic_fallback as sf
 from backend.mcp_server.tools.screen_vital_thresholds import run
 from backend.schemas import FhirContext, ToolStatus
 
@@ -342,6 +343,18 @@ class TestB2BreachDetails:
         assert "<90" in sbp_breach["threshold"]
         assert sbp_breach["value"] == pytest.approx(86.0)
 
+    async def test_data_source_defaults_to_fhir(self):
+        """Live FHIR fetch tags the result with data_source='fhir'."""
+        obs = _vitals_at(T0, sbp=122, dbp=78, hr=74, rr=16, spo2=98, temp=36.8)
+
+        with patch("backend.mcp_server.tools.screen_vital_thresholds.FhirClient") as M:
+            M.return_value.__aenter__.return_value.get_observations = AsyncMock(return_value=obs)
+
+            raw = await run("PT-001", 240, "postop", _sharp("PT-001"))
+
+        result = json.loads(raw)
+        assert result["data_source"] == "fhir"
+
     async def test_worst_breach_per_loinc_reported(self):
         """When two readings exist for same LOINC, worst (red) breach is reported."""
         # Two SBP readings: one yellow (95), one red (86)
@@ -359,3 +372,74 @@ class TestB2BreachDetails:
         sbp_breaches = [b for b in result["breaches"] if b["loinc"] == "8480-6"]
         assert len(sbp_breaches) == 1, "Only one breach per LOINC (worst)"
         assert sbp_breaches[0]["severity"] == "red"
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-fallback tests — auth errors trigger PT-007 trajectory load
+# ---------------------------------------------------------------------------
+
+
+class TestB2SyntheticFallback:
+    """When FHIR returns 401/403 AND VIGIL_SYNTHETIC_FALLBACK is set,
+    the tool transparently falls back to PT-007 and tags the result."""
+
+    async def test_403_with_env_uses_synthetic(self, monkeypatch):
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        sf.reset_for_tests()
+
+        with patch("backend.mcp_server.tools.screen_vital_thresholds.FhirClient") as M:
+            M.return_value.__aenter__.return_value.get_observations = AsyncMock(
+                side_effect=FhirClientError(
+                    "Insufficient scope access", status_code=403
+                )
+            )
+
+            raw = await run("PT-007", 240, "postop", _sharp("PT-007"))
+
+        result = json.loads(raw)
+        assert result["data_source"] == "synthetic_demo"
+        # PT-007 is the deteriorating trajectory — must trigger the
+        # MEWT trend rule, never status='fhir_error'.
+        assert result["status"] == ToolStatus.TRIGGERED
+        assert result["scanned_count"] > 0
+        assert len(result["breaches"]) >= 1
+
+    async def test_403_without_env_returns_error_envelope(self, monkeypatch):
+        """Default-off: 403 still surfaces as fhir_error when env not set."""
+        monkeypatch.delenv("VIGIL_SYNTHETIC_FALLBACK", raising=False)
+        sf.reset_for_tests()
+
+        with patch("backend.mcp_server.tools.screen_vital_thresholds.FhirClient") as M:
+            M.return_value.__aenter__.return_value.get_observations = AsyncMock(
+                side_effect=FhirClientError(
+                    "Insufficient scope access", status_code=403
+                )
+            )
+
+            raw = await run("PT-007", 240, "postop", _sharp("PT-007"))
+
+        result = json.loads(raw)
+        assert result["status"] == ToolStatus.FHIR_UNAVAILABLE
+        assert result["data_source"] == "fhir"
+
+    async def test_500_with_env_uses_synthetic_in_demo_mode(self, monkeypatch):
+        """In demo mode, ANY FhirClientError (including 5xx) flips to
+        synthetic so PO's launchpad always renders something coherent.
+        With the env flag OFF (production default) this test's twin
+        ``test_500_without_env_does_not_use_synthetic`` confirms 5xx still
+        propagates as ``fhir_error``."""
+        monkeypatch.setenv("VIGIL_SYNTHETIC_FALLBACK", "true")
+        sf.reset_for_tests()
+
+        with patch("backend.mcp_server.tools.screen_vital_thresholds.FhirClient") as M:
+            M.return_value.__aenter__.return_value.get_observations = AsyncMock(
+                side_effect=FhirClientError("server boom", status_code=503)
+            )
+
+            raw = await run("PT-007", 240, "postop", _sharp("PT-007"))
+
+        result = json.loads(raw)
+        assert result["data_source"] == "synthetic_demo"
+        # PT-007's bundled trajectory has SBP < 90 + HR > 110, so the
+        # screen should trigger.
+        assert result["status"] == ToolStatus.TRIGGERED

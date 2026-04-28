@@ -234,6 +234,7 @@ class ScreenVitalsOutput(BaseModel):
     scanned_count: int
     window_start: datetime
     window_end: datetime
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +336,7 @@ class RiskScoreOutput(BaseModel):
     risk_band: Literal["low", "moderate", "high"]
     rationale: str
     contributing_conditions: list[str]
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +428,7 @@ class SepsisFlagOutput(BaseModel):
     criteria_met: list[str]
     onset_estimate: datetime | None
     evidence: dict[str, Any]
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +613,7 @@ class EscalationOutput(BaseModel):
     communication_draft: dict[str, Any]
     generated_at: datetime
     model_used: str
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
 
 
 # ---------------------------------------------------------------------------

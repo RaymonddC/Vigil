@@ -46,6 +46,10 @@ from backend.a2a_agent.fhir_hook import (
 )
 from backend.a2a_agent.mcp_client import McpClientError, VigilMcpClient
 from backend.a2a_agent.skill_router import SkillId, resolve_skill
+from backend.mcp_server.synthetic_fallback import (
+    SYNTHETIC_DATA_SOURCE,
+    synthetic_disclosure,
+)
 
 logger = logging.getLogger("vigil.a2a.sentinel")
 
@@ -128,21 +132,27 @@ class PostopSentinelExecutor(AgentExecutor):
         )
 
         # --- Dispatch ---
+        # Each handler returns (chat_text, data_source). Skills that don't
+        # call MCP tools (start_watching) use ``LIVE_DATA_SOURCE`` (== "fhir")
+        # as a benign default — the env-var-gated synthetic path only fires
+        # inside the screening tools.
+        text: str
+        data_source: str = "fhir"
         try:
             if skill is SkillId.SCREEN_VITALS:
-                text = await self._handle_screen_vitals(
+                text, data_source = await self._handle_screen_vitals(
                     sharp_headers, patient_id
                 )
             elif skill is SkillId.SCORE_RISK:
-                text = await self._handle_score_risk(
+                text, data_source = await self._handle_score_risk(
                     sharp_headers, patient_id
                 )
             elif skill is SkillId.CHECK_SEPSIS:
-                text = await self._handle_check_sepsis(
+                text, data_source = await self._handle_check_sepsis(
                     sharp_headers, patient_id
                 )
             elif skill is SkillId.DRAFT_SBAR:
-                text = await self._handle_draft_sbar(
+                text, data_source = await self._handle_draft_sbar(
                     sharp_headers, patient_id
                 )
             elif skill is SkillId.START_WATCHING:
@@ -167,7 +177,11 @@ class PostopSentinelExecutor(AgentExecutor):
 
         await self._emit_completed(
             event_queue, task_id, context_id, text,
-            metadata={"skill": skill.value, "patient_id": patient_id},
+            metadata={
+                "skill": skill.value,
+                "patient_id": patient_id,
+                "data_source": data_source,
+            },
         )
 
     async def cancel(
@@ -193,8 +207,13 @@ class PostopSentinelExecutor(AgentExecutor):
         self,
         sharp_headers: dict[str, str],
         patient_id: str,
-    ) -> str:
-        """Run screen_vital_thresholds and format the MEWT result."""
+    ) -> tuple[str, str]:
+        """Run screen_vital_thresholds and format the MEWT result.
+
+        Returns ``(chat_text, data_source)`` where ``data_source`` is
+        either ``"fhir"`` or ``"synthetic_demo"`` so the dispatch loop
+        can echo it in A2A response metadata.
+        """
         try:
             raw = await self._mcp.call_tool(
                 "screen_vital_thresholds",
@@ -204,24 +223,26 @@ class PostopSentinelExecutor(AgentExecutor):
         except McpClientError as e:
             return (
                 f"I couldn't screen vitals for `{patient_id}` because "
-                f"the MCP tool was unreachable: {e}."
+                f"the MCP tool was unreachable: {e}.",
+                "fhir",
             )
 
         data = _unwrap_tool_result(raw)
         err = _tool_error_text(data, patient_id, action="screen vitals")
         if err is not None:
-            return err
+            return err, _data_source(data)
 
         breaches = data.get("breaches") or []
         scanned = data.get("scanned_count", 0)
         status = data.get("status", "ok")
 
         if not breaches:
-            return (
+            body = (
                 f"Vital screen for `{patient_id}`: no MEWT breaches across "
                 f"`{scanned}` recent observations. All vitals within "
                 "thresholds."
             )
+            return _with_disclosure(body, data), _data_source(data)
 
         red = sum(1 for b in breaches if b.get("severity") == "red")
         yellow = sum(1 for b in breaches if b.get("severity") == "yellow")
@@ -236,13 +257,14 @@ class PostopSentinelExecutor(AgentExecutor):
             f"`{b.get('severity', '?')}`)"
             for b in breaches[:5]
         ]
-        return "\n".join([header, *bullets])
+        body = "\n".join([header, *bullets])
+        return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_score_risk(
         self,
         sharp_headers: dict[str, str],
         patient_id: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         """Run score_deterioration_risk and format risk band + qSOFA."""
         try:
             raw = await self._mcp.call_tool(
@@ -253,13 +275,14 @@ class PostopSentinelExecutor(AgentExecutor):
         except McpClientError as e:
             return (
                 f"I couldn't score deterioration risk for `{patient_id}` "
-                f"because the MCP tool was unreachable: {e}."
+                f"because the MCP tool was unreachable: {e}.",
+                "fhir",
             )
 
         data = _unwrap_tool_result(raw)
         err = _tool_error_text(data, patient_id, action="score risk")
         if err is not None:
-            return err
+            return err, _data_source(data)
 
         band = data.get("risk_band", "unknown")
         qsofa = data.get("qsofa_score")
@@ -281,13 +304,14 @@ class PostopSentinelExecutor(AgentExecutor):
                 "Contributing conditions: "
                 + ", ".join(f"`{c}`" for c in comorbid[:5])
             )
-        return "\n".join(lines)
+        body = "\n".join(lines)
+        return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_check_sepsis(
         self,
         sharp_headers: dict[str, str],
         patient_id: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         """Run flag_sepsis_onset and format the CDC ASE evidence."""
         try:
             raw = await self._mcp.call_tool(
@@ -298,13 +322,14 @@ class PostopSentinelExecutor(AgentExecutor):
         except McpClientError as e:
             return (
                 f"I couldn't run the sepsis screen for `{patient_id}` "
-                f"because the MCP tool was unreachable: {e}."
+                f"because the MCP tool was unreachable: {e}.",
+                "fhir",
             )
 
         data = _unwrap_tool_result(raw)
         err = _tool_error_text(data, patient_id, action="check sepsis")
         if err is not None:
-            return err
+            return err, _data_source(data)
 
         suspected = bool(data.get("sepsis_suspected"))
         mode = data.get("mode", "cdc_ase")
@@ -318,10 +343,11 @@ class PostopSentinelExecutor(AgentExecutor):
                 else f" Mode `{mode}`; partial criteria: "
                 + "; ".join(f"`{c}`" for c in criteria[:3])
             )
-            return (
+            body = (
                 f"Sepsis screen for `{patient_id}`: not suspected."
                 + tail
             )
+            return _with_disclosure(body, data), _data_source(data)
 
         header = (
             f"Sepsis screen for `{patient_id}`: SUSPECTED "
@@ -330,13 +356,14 @@ class PostopSentinelExecutor(AgentExecutor):
             + ")."
         )
         bullets = [f"- {c}" for c in criteria[:5]]
-        return "\n".join([header, "Criteria met:", *bullets])
+        body = "\n".join([header, "Criteria met:", *bullets])
+        return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_draft_sbar(
         self,
         sharp_headers: dict[str, str],
         patient_id: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         """Run all 3 screens + generate_escalation_note. Return SBAR text.
 
         Does NOT enqueue to the review queue. The autonomous polling loop
@@ -365,7 +392,8 @@ class PostopSentinelExecutor(AgentExecutor):
         except McpClientError as e:
             return (
                 f"I couldn't draft an SBAR for `{patient_id}` because "
-                f"a screening MCP tool was unreachable: {e}."
+                f"a screening MCP tool was unreachable: {e}.",
+                "fhir",
             )
 
         # Pick a recipient based on whether sepsis fires — same heuristic
@@ -377,14 +405,24 @@ class PostopSentinelExecutor(AgentExecutor):
             "rapid_response" if sepsis_triggered else "charge_nurse"
         )
 
+        # Unwrap each upstream result before forwarding — the MCP tool
+        # signature expects flat dicts (with ``breaches``, ``qsofa_score``,
+        # etc.), not the FastMCP wrapper ``{content: [...], structuredContent}``.
+        # Forwarding the wrapper makes the LLM see empty inputs and emit
+        # "no breaches / qSOFA 0/3 / unknown" prose regardless of what
+        # actually happened upstream.
+        unwrapped_vitals = _unwrap_tool_result(screen_result)
+        unwrapped_risk = _unwrap_tool_result(risk_result)
+        unwrapped_sepsis = _unwrap_tool_result(sepsis_result)
+
         try:
             escalation_result = await self._mcp.call_tool(
                 "generate_escalation_note",
                 arguments={
                     "patient_id": patient_id,
-                    "vitals_result": screen_result,
-                    "risk_result": risk_result,
-                    "sepsis_result": sepsis_result,
+                    "vitals_result": unwrapped_vitals,
+                    "risk_result": unwrapped_risk,
+                    "sepsis_result": unwrapped_sepsis,
                     "recipient_role": recipient_role,
                 },
                 sharp_headers=sharp_headers,
@@ -392,13 +430,30 @@ class PostopSentinelExecutor(AgentExecutor):
         except McpClientError as e:
             return (
                 f"I couldn't draft an SBAR for `{patient_id}` because "
-                f"the escalation-note MCP tool failed: {e}."
+                f"the escalation-note MCP tool failed: {e}.",
+                "fhir",
             )
 
         data = _unwrap_tool_result(escalation_result)
         err = _tool_error_text(data, patient_id, action="draft an SBAR")
         if err is not None:
-            return err
+            return err, _data_source(data)
+
+        # Synthetic origin propagates from any of the four tool calls —
+        # if a single tool fell back, the whole SBAR was generated from
+        # synthetic data and the disclosure must say so.
+        any_synthetic = any(
+            _data_source(_unwrap_tool_result(r)) == SYNTHETIC_DATA_SOURCE
+            for r in (
+                screen_result,
+                risk_result,
+                sepsis_result,
+                escalation_result,
+            )
+        )
+        data_source = (
+            SYNTHETIC_DATA_SOURCE if any_synthetic else "fhir"
+        )
 
         narrative = (data.get("narrative") or "").strip()
         severity = data.get("severity") or "info"
@@ -411,6 +466,7 @@ class PostopSentinelExecutor(AgentExecutor):
                 "patient_id": patient_id,
                 "severity": severity,
                 "model_used": model_used,
+                "data_source": data_source,
             },
         )
 
@@ -419,16 +475,25 @@ class PostopSentinelExecutor(AgentExecutor):
             f"recipient `{resolved_recipient}` (model `{model_used}`)."
         )
         if narrative:
-            return f"{header}\n\n{narrative}"
+            body = f"{header}\n\n{narrative}"
+        else:
+            # Fall back to assembling from the structured SBAR block if the
+            # narrative is empty.
+            sbar = data.get("sbar") or {}
+            block = "\n".join(
+                f"**{k.title()}:** {sbar.get(k, '').strip() or '—'}"
+                for k in (
+                    "situation",
+                    "background",
+                    "assessment",
+                    "recommendation",
+                )
+            )
+            body = f"{header}\n\n{block}"
 
-        # Fall back to assembling from the structured SBAR block if the
-        # narrative is empty.
-        sbar = data.get("sbar") or {}
-        block = "\n".join(
-            f"**{k.title()}:** {sbar.get(k, '').strip() or '—'}"
-            for k in ("situation", "background", "assessment", "recommendation")
-        )
-        return f"{header}\n\n{block}"
+        if data_source == SYNTHETIC_DATA_SOURCE:
+            body = f"{synthetic_disclosure()}\n\n{body}"
+        return body, data_source
 
     async def _handle_start_watching(
         self,
@@ -548,6 +613,32 @@ def _unwrap_tool_result(data: Any) -> dict[str, Any]:
                 return parsed if isinstance(parsed, dict) else {}
         return data
     return {}
+
+
+def _data_source(data: dict[str, Any]) -> str:
+    """Extract ``data_source`` from a tool result. Defaults to ``"fhir"``.
+
+    The 4 MCP tools tag every output with ``data_source=fhir`` (live
+    workspace) or ``data_source=synthetic_demo`` (env-var-gated PT-007
+    fallback). Consumers default to "fhir" so older outputs without the
+    field — e.g. mocks in older tests — keep the existing behaviour.
+    """
+    src = data.get("data_source")
+    return src if isinstance(src, str) else "fhir"
+
+
+def _with_disclosure(body: str, data: dict[str, Any]) -> str:
+    """Prefix an honest one-liner if the result came from synthetic data.
+
+    The synthetic fallback's chat-friendly disclosure (see
+    :func:`backend.mcp_server.synthetic_fallback.synthetic_disclosure`)
+    is the public-facing receipt that PO's launchpad shows the operator
+    when the workspace's FHIR server didn't accept our token. Live-data
+    responses pass through unchanged.
+    """
+    if _data_source(data) == SYNTHETIC_DATA_SOURCE:
+        return f"{synthetic_disclosure()}\n\n{body}"
+    return body
 
 
 def _tool_error_text(

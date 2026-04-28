@@ -29,6 +29,30 @@ class FhirClientError(Exception):
         self.status_code = status_code
 
 
+def is_fhir_auth_error(exc: BaseException) -> bool:
+    """Return True if the exception should trigger the synthetic-FHIR fallback.
+
+    When ``VIGIL_SYNTHETIC_FALLBACK`` is on (demo mode), ANY ``FhirClientError``
+    flips us to the bundled PT-007 trajectory so the launchpad always renders
+    a clinically coherent response. PO's FHIR proxy returns 401/403 for
+    missing-scope reads but also 4xx (e.g. 422) for unrecognised workspace
+    paths and 5xx during transient failures — all of these are "we can't
+    read FHIR right now" and the demo should degrade gracefully rather than
+    surfacing a raw error to a recruiter.
+
+    When the env flag is OFF (production default), behaviour reverts to the
+    original narrow 401/403 match so real FHIR-server errors still surface
+    through the standard ``fhir_error`` envelope.
+    """
+    if not isinstance(exc, FhirClientError):
+        return False
+    # Demo mode: any FHIR error → synthetic.
+    import os
+    if os.environ.get("VIGIL_SYNTHETIC_FALLBACK", "").lower() in ("1", "true", "yes", "on"):
+        return True
+    return exc.status_code in (401, 403)
+
+
 class FhirClient:
     """Async FHIR R4 client backed by httpx.
 

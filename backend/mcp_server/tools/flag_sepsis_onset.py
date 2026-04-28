@@ -24,8 +24,15 @@ from typing import Any
 from backend.criteria.kdigo import evaluate_kdigo
 from backend.criteria.qsofa import evaluate_qsofa
 from backend.criteria.sirs import evaluate_sirs
-from backend.fhir.client import FhirClient, FhirClientError
+from backend.fhir.client import FhirClient, FhirClientError, is_fhir_auth_error
 from backend.fhir.models import MedicationAdministration, Observation
+from backend.mcp_server.synthetic_fallback import (
+    LIVE_DATA_SOURCE,
+    SYNTHETIC_DATA_SOURCE,
+    get_synthetic_medication_administrations,
+    get_synthetic_observations,
+    is_fallback_enabled,
+)
 from backend.obs.metrics import tool_call_timer
 from backend.schemas import FhirContext, SepsisFlagOutput, ToolStatus
 
@@ -158,6 +165,7 @@ async def run(
     ).isoformat()
 
     async with tool_call_timer("flag_sepsis_onset", patient_id) as ctx:
+        data_source = LIVE_DATA_SOURCE
         try:
             async with FhirClient(sharp) as fhir:
                 vitals = await fhir.get_observations(
@@ -170,21 +178,33 @@ async def run(
                     patient_id,
                 )
         except FhirClientError as exc:
-            logger.error(
-                "FHIR fetch failed for flag_sepsis_onset",
-                extra={"patient_id": patient_id, "error": str(exc)},
-            )
-            ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
-            output = SepsisFlagOutput(
-                status=ToolStatus.FHIR_UNAVAILABLE,
-                patient_id=patient_id,
-                sepsis_suspected=False,
-                mode="cdc_ase",
-                criteria_met=[],
-                onset_estimate=None,
-                evidence={"error": str(exc)},
-            )
-            return output.model_dump_json()
+            # Auth-shaped failure → opt-in fallback to PT-007 trajectory.
+            # See backend/mcp_server/synthetic_fallback.py docstring.
+            if is_fhir_auth_error(exc) and is_fallback_enabled():
+                logger.warning(
+                    "FHIR auth denied; using synthetic PT-007 trajectory",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                vitals = get_synthetic_observations(category="vital-signs")
+                labs = get_synthetic_observations(category="laboratory")
+                med_admins = get_synthetic_medication_administrations()
+                data_source = SYNTHETIC_DATA_SOURCE
+            else:
+                logger.error(
+                    "FHIR fetch failed for flag_sepsis_onset",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+                ctx["status"] = ToolStatus.FHIR_UNAVAILABLE
+                output = SepsisFlagOutput(
+                    status=ToolStatus.FHIR_UNAVAILABLE,
+                    patient_id=patient_id,
+                    sepsis_suspected=False,
+                    mode="cdc_ase",
+                    criteria_met=[],
+                    onset_estimate=None,
+                    evidence={"error": str(exc)},
+                )
+                return output.model_dump_json()
 
         all_obs = vitals + labs
         evidence: dict[str, Any] = {}
@@ -310,5 +330,6 @@ async def run(
             criteria_met=criteria_met,
             onset_estimate=onset_estimate,
             evidence=evidence,
+            data_source=data_source,
         )
         return output.model_dump_json()
