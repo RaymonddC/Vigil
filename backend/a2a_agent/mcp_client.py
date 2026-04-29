@@ -1,7 +1,11 @@
 """Thin httpx wrapper for calling Vigil MCP tools from the A2A agent.
 
 Forwards the 3 SHARP headers onto every MCP tool call. The MCP server
-is at localhost:7001 by default (VIGIL_MCP_URL env var).
+is at localhost:7001 by default. The base URL is resolved with the
+following precedence: explicit ``base_url`` constructor arg > the
+canonical ``MCP_BASE_URL`` env var (matches docker-compose) > the
+legacy ``VIGIL_MCP_URL`` env var (back-compat for local ``.env``
+files) > ``DEFAULT_MCP_URL``.
 
 Reference: PROMPT_OPINION_INTEGRATION.md §3.4, BUILD_PLAN.md B7
 """
@@ -40,6 +44,12 @@ class VigilMcpClient:
     def __init__(self, base_url: str | None = None) -> None:
         """Initialize the MCP client.
 
+        Base-URL precedence: explicit ``base_url`` arg > ``MCP_BASE_URL``
+        env var (canonical, matches the name set in ``docker-compose.yml``
+        for the ``a2a`` service) > ``VIGIL_MCP_URL`` env var (legacy name
+        retained as a fallback for back-compat with existing local
+        ``.env`` files) > ``DEFAULT_MCP_URL``.
+
         If ``VIGIL_API_KEY`` is set in the environment, it will be forwarded
         as ``X-API-Key`` on every tool call so the MCP server's SEC-05
         middleware accepts the request. Captured once at construction; if
@@ -48,7 +58,9 @@ class VigilMcpClient:
         """
         self._base_url = (
             base_url
-            or os.environ.get("VIGIL_MCP_URL", DEFAULT_MCP_URL)
+            or os.environ.get("MCP_BASE_URL")
+            or os.environ.get("VIGIL_MCP_URL")
+            or DEFAULT_MCP_URL
         ).rstrip("/")
         self._api_key = os.environ.get("VIGIL_API_KEY")
 
