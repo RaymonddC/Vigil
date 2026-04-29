@@ -17,6 +17,7 @@ from backend.fhir.models import (
     Condition,
     Encounter,
     MedicationAdministration,
+    MedicationRequest,
     Observation,
     Patient,
 )
@@ -189,6 +190,22 @@ class FhirClient:
         )
         entries = data.get("entry", [])
         return [MedicationAdministration.model_validate(e["resource"]) for e in entries]
+
+    async def get_medication_requests(
+        self, patient_id: str, status: str = "active",
+    ) -> list[MedicationRequest]:
+        """GET /MedicationRequest?patient={id}&status={status}.
+
+        Used by ``flag_treatment_conflicts`` to surface drug *orders* that
+        haven't necessarily been administered yet. Defaults to ``active``
+        per FHIR R4 — pass ``""`` (or any falsy value) to skip filtering.
+        """
+        params: dict[str, str] = {"patient": patient_id}
+        if status:
+            params["status"] = status
+        data = await self._get("MedicationRequest", params=params)
+        entries = data.get("entry", [])
+        return [MedicationRequest.model_validate(e["resource"]) for e in entries]
 
     async def get_encounter(self, patient_id: str) -> Encounter | None:
         """GET /Encounter?patient={id}&status=in-progress (latest active).

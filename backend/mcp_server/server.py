@@ -23,9 +23,13 @@ from pydantic import Field
 
 from backend.mcp_server.context import get_sharp_context, resolve_patient_id
 from backend.mcp_server.middleware import SharpHeaderMiddleware
+from backend.mcp_server.tools import assess_postop_aki as _b_aki
+from backend.mcp_server.tools import assess_pph_severity as _b_pph
 from backend.mcp_server.tools import flag_sepsis_onset as _b4
+from backend.mcp_server.tools import flag_treatment_conflicts as _b_tx
 from backend.mcp_server.tools import generate_escalation_note as _b5
 from backend.mcp_server.tools import score_deterioration_risk as _b3
+from backend.mcp_server.tools import score_news2 as _b_news2
 from backend.mcp_server.tools import screen_vital_thresholds as _b2
 from backend.obs.logging import configure_logging, get_logger
 from backend.security.api_key import build_api_key_middleware, warn_if_unset
@@ -227,6 +231,200 @@ async def generate_escalation_note(
     return await _b5.run(
         pid, vitals_result, risk_result, sepsis_result, recipient_role, sharp,
     )
+
+
+@mcp.tool(
+    name="assess_postop_aki",
+    description=(
+        "KDIGO-staged AKI verdict (stages 0–3) using serial creatinine "
+        "and 24h urine output. Imputes baseline creatinine as the lowest "
+        "value in the past 7 days when no historical baseline is supplied "
+        "(KDIGO 2012 §3.1.2) and surfaces the imputation explicitly. "
+        "Layers an SCCM-2017 (Joannidis ICM 2017;43:730) time-to-"
+        "intervention recommendation on top. Deterministic — no LLM."
+    ),
+)
+async def assess_postop_aki(
+    patient_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="FHIR Patient.id. Optional if SHARP header set.",
+        ),
+    ] = None,
+    creatinine_baseline_override: Annotated[
+        float | None,
+        Field(
+            default=None,
+            ge=0.1,
+            le=20.0,
+            description=(
+                "Override the imputed baseline with a clinician-supplied "
+                "value (mg/dL). Skips imputation entirely."
+            ),
+        ),
+    ] = None,
+    ctx: Context | None = None,
+) -> str:
+    """KDIGO AKI staging via deterministic engine."""
+    sharp = get_sharp_context(ctx)
+    pid = resolve_patient_id(patient_id, sharp)
+    logger.info(
+        "tool called",
+        extra={"tool": "assess_postop_aki", "patient_id": pid},
+    )
+    return await _b_aki.run(
+        pid, sharp, creatinine_baseline_override=creatinine_baseline_override,
+    )
+
+
+@mcp.tool(
+    name="score_news2",
+    description=(
+        "NEWS2 (Royal College of Physicians 2017) deterioration score — a "
+        "second opinion to qSOFA. Returns aggregate 0–20, banded "
+        "{low, low-medium, medium, high}, red_flag boolean (any single "
+        "parameter scoring 3), and the per-parameter contribution table. "
+        "Deterministic — no LLM."
+    ),
+)
+async def score_news2(
+    patient_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="FHIR Patient.id. Optional if SHARP header set.",
+        ),
+    ] = None,
+    lookback_minutes: Annotated[
+        int,
+        Field(
+            default=240,
+            ge=15,
+            le=1440,
+            description="Minutes to scan vitals for the latest set.",
+        ),
+    ] = 240,
+    ctx: Context | None = None,
+) -> str:
+    """NEWS2 score from the most recent vital set."""
+    sharp = get_sharp_context(ctx)
+    pid = resolve_patient_id(patient_id, sharp)
+    logger.info(
+        "tool called", extra={"tool": "score_news2", "patient_id": pid},
+    )
+    return await _b_news2.run(pid, lookback_minutes, sharp)
+
+
+@mcp.tool(
+    name="assess_pph_severity",
+    description=(
+        "CMQCC OB Hemorrhage Toolkit v3.0 staging for postpartum "
+        "hemorrhage. Inputs: cumulative EBL (LOINC 55758-7), HR, SBP, "
+        "fibrinogen, hemoglobin trend; optional uterotonic count. "
+        "Returns stage 0–3, shock index, triggers, and the verbatim "
+        "CMQCC action ladder (NOT LLM-generated). Falls back to shock-"
+        "index-only with explicit caveat when EBL is unmeasured."
+    ),
+)
+async def assess_pph_severity(
+    patient_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="FHIR Patient.id. Optional if SHARP header set.",
+        ),
+    ] = None,
+    delivery_route: Annotated[
+        Literal["vaginal", "cesarean", "unknown"],
+        Field(
+            default="vaginal",
+            description="Affects Stage-1 EBL cutoff (500 vs 1000 mL).",
+        ),
+    ] = "vaginal",
+    uterotonics_given: Annotated[
+        int,
+        Field(
+            default=0,
+            ge=0,
+            le=10,
+            description=(
+                "Bedside-supplied count of uterotonics administered. "
+                "≥2 contributes to Stage 2."
+            ),
+        ),
+    ] = 0,
+    clinical_instability: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=(
+                "Bedside flag for hemodynamic instability beyond "
+                "absolute thresholds. Triggers Stage 3 escalation."
+            ),
+        ),
+    ] = False,
+    ctx: Context | None = None,
+) -> str:
+    """CMQCC v3.0 PPH staging."""
+    sharp = get_sharp_context(ctx)
+    pid = resolve_patient_id(patient_id, sharp)
+    logger.info(
+        "tool called",
+        extra={"tool": "assess_pph_severity", "patient_id": pid},
+    )
+    return await _b_pph.run(
+        pid, sharp,
+        delivery_route=delivery_route,
+        uterotonics_given=uterotonics_given,
+        clinical_instability=clinical_instability,
+    )
+
+
+@mcp.tool(
+    name="flag_treatment_conflicts",
+    description=(
+        "Physiology-aware drug safety scanner. Flags drug-vs-vitals/"
+        "labs/conditions conflicts across 5 deterministic rules: "
+        "(1) NSAID + AKI [KDIGO 2012, Beers 2023]; "
+        "(2) β-blocker + bradycardia/hypotension [ACC/AHA 2017]; "
+        "(3) ACE-I/ARB + hyperkalemia [KDIGO 2024 BP-in-CKD]; "
+        "(4) opioid + respiratory depression [ASPMN 2020]; "
+        "(5) anticoagulant + Hgb drop / bleeding [ASH 2018]. "
+        "Cites guideline per rule; deterministic — no LLM."
+    ),
+)
+async def flag_treatment_conflicts(
+    patient_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="FHIR Patient.id. Optional if SHARP header set.",
+        ),
+    ] = None,
+    lookback_hours: Annotated[
+        int,
+        Field(
+            default=24,
+            ge=1,
+            le=72,
+            description=(
+                "How far back to scan vitals + medication "
+                "administrations, in hours. Labs use a 7-day window "
+                "regardless (needed for the Hgb-drop rule)."
+            ),
+        ),
+    ] = 24,
+    ctx: Context | None = None,
+) -> str:
+    """Scan for drug-vs-physiology conflicts via the deterministic engine."""
+    sharp = get_sharp_context(ctx)
+    pid = resolve_patient_id(patient_id, sharp)
+    logger.info(
+        "tool called",
+        extra={"tool": "flag_treatment_conflicts", "patient_id": pid},
+    )
+    return await _b_tx.run(pid, sharp, lookback_hours=lookback_hours)
 
 
 # ---------------------------------------------------------------------------

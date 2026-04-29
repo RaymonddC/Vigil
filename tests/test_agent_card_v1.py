@@ -31,6 +31,10 @@ EXPECTED_SKILL_IDS = {
     "vigil.check_sepsis",
     "vigil.draft_sbar",
     "vigil.start_watching",
+    "vigil.assess_postop_aki",
+    "vigil.score_news2",
+    "vigil.assess_pph_severity",
+    "vigil.flag_treatment_conflicts",
 }
 
 
@@ -79,6 +83,8 @@ def test_fhir_context_extension_uri_and_scopes_survive_round_trip() -> None:
 def test_skill_set_matches_post_refactor_catalogue() -> None:
     served = _served_card()
     assert {s["id"] for s in served["skills"]} == EXPECTED_SKILL_IDS
+    # Explicit count check guards against accidental drops on edits.
+    assert len(served["skills"]) == 9
 
 
 def test_capabilities_disable_streaming_and_state_history() -> None:

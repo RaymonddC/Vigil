@@ -123,18 +123,23 @@ class TestTimestampRebasing:
         )
 
     def test_relative_offsets_preserved(self) -> None:
-        """Two observations originally 8h apart remain 8h apart."""
+        """Two observations originally 8h+ apart remain that far apart.
+
+        PT-007 spans T0..T+9h after the opioid + respiratory-depression
+        rule was added (a T+9h SpO2 row backs the
+        ``flag_treatment_conflicts`` skill's demo path). Earlier
+        revisions of the trajectory ended at T+8h.
+        """
         obs = sf.get_synthetic_observations()
         timestamps = [
             o.effectiveDateTime
             for o in obs
             if o.effectiveDateTime is not None
         ]
-        # PT-007 trajectory spans T0..T+8h, so total spread should be ~8h.
         spread = max(timestamps) - min(timestamps)
         assert timedelta(hours=7, minutes=30) <= spread <= timedelta(
-            hours=8, minutes=30
-        ), f"expected ~8h spread, got {spread}"
+            hours=9, minutes=30
+        ), f"expected ~8-9h spread, got {spread}"
 
 
 class TestAuthErrorDetection:

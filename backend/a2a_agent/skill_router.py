@@ -28,14 +28,44 @@ class SkillId(StrEnum):
     CHECK_SEPSIS = "vigil.check_sepsis"
     DRAFT_SBAR = "vigil.draft_sbar"
     START_WATCHING = "vigil.start_watching"
+    ASSESS_AKI = "vigil.assess_postop_aki"
+    SCORE_NEWS2 = "vigil.score_news2"
+    ASSESS_PPH = "vigil.assess_pph_severity"
+    FLAG_TREATMENT_CONFLICTS = "vigil.flag_treatment_conflicts"
 
 
 # Keyword map, ordered by specificity. First hit wins.
 # Tuple form (tokens, skill) so the iteration order is stable and explicit.
+#
+# Order matters! More-specific tokens must come first, otherwise the
+# generic ``score``/``risk`` keywords would steal NEWS2 and PPH prompts.
 _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
+    # Treatment-conflict skill — must come BEFORE the generic
+    # ``risk``/``score`` family, because prompts like "is it safe to
+    # give X" or "any drug interaction risk" otherwise leak to
+    # SCORE_RISK. Phrases are intentionally specific to the
+    # order-writing/safety question — not just any "med" mention.
+    (
+        ("safe to give", "can i order", "can i give", "ok to order",
+         "drug interaction", "med safety", "medication safety",
+         "treatment conflict", "treatment conflicts",
+         "drug conflict", "drug-vs", "contraindication",
+         "contraindicated"),
+        SkillId.FLAG_TREATMENT_CONFLICTS,
+    ),
+    (
+        ("pph", "postpartum hemorrhage", "postpartum hemmorhage",
+         "blood loss", "hemorrhage", "haemorrhage", "cmqcc"),
+        SkillId.ASSESS_PPH,
+    ),
+    (
+        ("aki", "kidney injury", "creatinine", "kdigo", "renal injury"),
+        SkillId.ASSESS_AKI,
+    ),
+    (("news2", "news 2", "early warning"), SkillId.SCORE_NEWS2),
     (("sepsis", "septic", "infection"), SkillId.CHECK_SEPSIS),
-    (("risk", "news2", "qsofa", "score"), SkillId.SCORE_RISK),
+    (("risk", "qsofa", "score"), SkillId.SCORE_RISK),
     (("watch", "monitor", "polling"), SkillId.START_WATCHING),
     (("vital", "screen", "mewt"), SkillId.SCREEN_VITALS),
 ]

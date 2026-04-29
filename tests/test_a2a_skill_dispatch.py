@@ -145,7 +145,9 @@ class TestResolveSkill:
         assert resolve_skill(msg) is SkillId.DRAFT_SBAR
 
     def test_keyword_risk(self) -> None:
-        msg = _make_message(text="what's the news2 risk")
+        # NEWS2 is now its own skill — generic ``risk``/``qsofa``
+        # keywords still route to SCORE_RISK.
+        msg = _make_message(text="what's the qsofa risk")
         assert resolve_skill(msg) is SkillId.SCORE_RISK
 
     def test_keyword_vitals(self) -> None:
@@ -247,7 +249,7 @@ class TestSkillDispatch:
         executor = PostopSentinelExecutor(mcp=mcp)
         ctx = _make_context(
             _make_message(
-                text="score the news2 risk", fhir_metadata=_fhir_metadata()
+                text="score the qsofa risk", fhir_metadata=_fhir_metadata()
             )
         )
         event_queue = _make_event_queue()
