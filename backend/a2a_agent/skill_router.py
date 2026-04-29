@@ -12,6 +12,7 @@ Reference: docs/A2A_REFACTOR_AUDIT.md §"Proposed skill surface".
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -46,12 +47,18 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
     # give X" or "any drug interaction risk" otherwise leak to
     # SCORE_RISK. Phrases are intentionally specific to the
     # order-writing/safety question — not just any "med" mention.
+    # Natural chat phrasings ("Is <drug> safe for <patient>?", "ok for",
+    # "any conflict") are added alongside the original imperative forms;
+    # paired with the drug+verb fallback below to keep med-safety prompts
+    # out of the screen_vitals default.
     (
         ("safe to give", "can i order", "can i give", "ok to order",
          "drug interaction", "med safety", "medication safety",
          "treatment conflict", "treatment conflicts",
          "drug conflict", "drug-vs", "contraindication",
-         "contraindicated"),
+         "contraindicated",
+         "safe for", "ok for", "okay for", "appropriate for",
+         "any conflict", "any contraindication"),
         SkillId.FLAG_TREATMENT_CONFLICTS,
     ),
     (
@@ -71,6 +78,34 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
 ]
 
 DEFAULT_SKILL = SkillId.SCREEN_VITALS
+
+
+# Drug-name catch-all: if the prompt names a drug from the rule table AND
+# uses a safety-question verb (safe / ok / give / start / order / appropriate
+# / administer / prescribe), route to flag_treatment_conflicts. Runs only
+# after the primary keyword scan returns no hit, so we never override a
+# more-specific skill match. Word boundaries via \b avoid false positives
+# (e.g. "ok" inside other tokens). Drug list mirrors backend.criteria.med_rules.
+_DRUG_NAMES: tuple[str, ...] = (
+    "ibuprofen", "ketorolac", "naproxen", "celecoxib", "diclofenac",
+    "meloxicam", "aspirin",
+    "metoprolol", "atenolol", "propranolol", "carvedilol", "bisoprolol",
+    "esmolol", "labetalol",
+    "lisinopril", "enalapril", "ramipril", "losartan", "valsartan",
+    "irbesartan", "candesartan", "captopril",
+    "morphine", "oxycodone", "hydrocodone", "fentanyl", "hydromorphone",
+    "codeine", "tramadol", "buprenorphine",
+    "heparin", "enoxaparin", "warfarin", "apixaban", "rivaroxaban",
+    "dabigatran", "edoxaban", "fondaparinux",
+)
+
+_DRUG_NAME_RE = re.compile(
+    r"\b(" + "|".join(_DRUG_NAMES) + r")\b", re.IGNORECASE
+)
+_SAFETY_VERB_RE = re.compile(
+    r"\b(safe|ok|okay|give|start|order|appropriate|administer|prescribe)\b",
+    re.IGNORECASE,
+)
 
 
 def _from_metadata(metadata: dict[str, Any] | None) -> SkillId | None:
@@ -98,6 +133,19 @@ def _from_text(text: str) -> SkillId | None:
         if any(tok in t for tok in tokens):
             return skill
     return None
+
+
+def _drug_verb_fallback(text: str) -> SkillId | None:
+    """Catch natural med-safety phrasings the keyword list didn't cover.
+
+    Triggers only when no canonical keyword matched, so it never overrides
+    a more-specific skill (sepsis / AKI / NEWS2 / etc.).
+    """
+    if not _DRUG_NAME_RE.search(text):
+        return None
+    if not _SAFETY_VERB_RE.search(text):
+        return None
+    return SkillId.FLAG_TREATMENT_CONFLICTS
 
 
 def _part_text(part: Any) -> str:
@@ -133,4 +181,8 @@ def resolve_skill(message: Any) -> SkillId:
         return md_hit
     parts = getattr(message, "parts", None) or []
     text_blob = " ".join(_part_text(p) for p in parts)
-    return _from_text(text_blob) or DEFAULT_SKILL
+    return (
+        _from_text(text_blob)
+        or _drug_verb_fallback(text_blob.lower())
+        or DEFAULT_SKILL
+    )

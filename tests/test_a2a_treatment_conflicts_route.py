@@ -131,6 +131,52 @@ class TestKeywordRouting:
 
 
 # ---------------------------------------------------------------------------
+# Natural chat phrasings — verified live as the dominant pattern other PO
+# agents emit. Pre-fix these fell through to screen_vitals; post-fix they
+# must land on flag_treatment_conflicts via either the new "safe for"/"ok
+# for" keyword extensions or the drug+verb fallback.
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingNaturalPhrasings:
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Is lisinopril safe for PT-008?",
+            "Is metoprolol safe for PT-007?",
+            "Is morphine safe for PT-007?",
+            "Is enoxaparin safe for PT-010?",
+            "Is ibuprofen ok for PT-008?",
+            "Is ketorolac okay for PT-008?",
+            "Is celecoxib appropriate for PT-008?",
+            "any conflict starting warfarin?",
+            "any contraindication for atenolol?",
+        ],
+    )
+    def test_natural_phrasing_routes_to_flag_treatment_conflicts(
+        self, prompt: str
+    ) -> None:
+        assert (
+            resolve_skill(_msg(prompt))
+            is SkillId.FLAG_TREATMENT_CONFLICTS
+        )
+
+    @pytest.mark.parametrize(
+        "prompt, expected",
+        [
+            ("Screen this patient's vitals", SkillId.SCREEN_VITALS),
+            ("What's the qSOFA?", SkillId.SCORE_RISK),
+        ],
+    )
+    def test_adjacent_skills_unaffected(
+        self, prompt: str, expected: SkillId
+    ) -> None:
+        # Regression guard: the new keyword list / drug-verb fallback must
+        # not bleed into vitals or risk-score routing.
+        assert resolve_skill(_msg(prompt)) is expected
+
+
+# ---------------------------------------------------------------------------
 # Specificity ordering — must beat the generic risk/score keyword family.
 # ---------------------------------------------------------------------------
 
