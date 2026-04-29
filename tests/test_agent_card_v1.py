@@ -31,6 +31,9 @@ EXPECTED_SKILL_IDS = {
     "vigil.check_sepsis",
     "vigil.draft_sbar",
     "vigil.start_watching",
+    "vigil.assess_postop_aki",
+    "vigil.score_news2",
+    "vigil.assess_pph_severity",
 }
 
 

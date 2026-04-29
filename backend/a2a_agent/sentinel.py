@@ -155,6 +155,18 @@ class PostopSentinelExecutor(AgentExecutor):
                 text, data_source = await self._handle_draft_sbar(
                     sharp_headers, patient_id
                 )
+            elif skill is SkillId.ASSESS_AKI:
+                text, data_source = await self._handle_assess_aki(
+                    sharp_headers, patient_id
+                )
+            elif skill is SkillId.SCORE_NEWS2:
+                text, data_source = await self._handle_score_news2(
+                    sharp_headers, patient_id
+                )
+            elif skill is SkillId.ASSESS_PPH:
+                text, data_source = await self._handle_assess_pph(
+                    sharp_headers, patient_id
+                )
             elif skill is SkillId.START_WATCHING:
                 text = await self._handle_start_watching(
                     sharp_headers, patient_id
@@ -492,8 +504,178 @@ class PostopSentinelExecutor(AgentExecutor):
             body = f"{header}\n\n{block}"
 
         if data_source == SYNTHETIC_DATA_SOURCE:
-            body = f"{synthetic_disclosure()}\n\n{body}"
+            body = f"{synthetic_disclosure(patient_id)}\n\n{body}"
         return body, data_source
+
+    async def _handle_assess_aki(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """Run assess_postop_aki and format the KDIGO verdict."""
+        try:
+            raw = await self._mcp.call_tool(
+                "assess_postop_aki",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't assess AKI for `{patient_id}` because the "
+                f"MCP tool was unreachable: {e}.",
+                "fhir",
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="assess AKI")
+        if err is not None:
+            return err, _data_source(data)
+
+        stage = data.get("kdigo_stage", 0)
+        criteria = data.get("criteria_met") or []
+        creat = data.get("creatinine_current")
+        baseline = data.get("creatinine_baseline")
+        baseline_imputed = bool(data.get("baseline_imputed"))
+        baseline_source = data.get("baseline_source") or "unknown source"
+        ttf = data.get("time_to_intervention_hours")
+        rationale = data.get("rationale") or "no rationale provided"
+
+        creat_str = f"`{creat:.2f}`" if isinstance(creat, (int, float)) else "`?`"
+        baseline_str = (
+            f"`{baseline:.2f}`" if isinstance(baseline, (int, float)) else "`?`"
+        )
+        if ttf is None:
+            ttf_str = "no urgent intervention indicated"
+        elif ttf == 0:
+            ttf_str = "**immediate** intervention (SCCM 2017)"
+        else:
+            ttf_str = f"intervention within `{ttf}h` (SCCM 2017)"
+
+        header = (
+            f"AKI assessment for `{patient_id}`: KDIGO **Stage "
+            f"{stage}**. SCr {creat_str} mg/dL vs baseline "
+            f"{baseline_str} mg/dL. Recommendation: {ttf_str}."
+        )
+        lines = [header]
+        if baseline_imputed:
+            lines.append(f"Baseline imputed — {baseline_source}.")
+        if criteria:
+            lines.append("Criteria met:")
+            lines.extend(f"- {c}" for c in criteria[:5])
+        lines.append(f"Rationale: {rationale}")
+        body = "\n".join(lines)
+        return _with_disclosure(body, data), _data_source(data)
+
+    async def _handle_score_news2(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """Run score_news2 and format the RCP NEWS2 verdict."""
+        try:
+            raw = await self._mcp.call_tool(
+                "score_news2",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't score NEWS2 for `{patient_id}` because the "
+                f"MCP tool was unreachable: {e}.",
+                "fhir",
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="score NEWS2")
+        if err is not None:
+            return err, _data_source(data)
+
+        agg = data.get("aggregate_score", 0)
+        band = data.get("band", "unknown")
+        red_flag = bool(data.get("red_flag"))
+        contributions = data.get("parameter_contributions") or []
+        rationale = data.get("rationale") or "no rationale provided"
+
+        flag_text = " — **red flag** (single-parameter 3)" if red_flag else ""
+        header = (
+            f"NEWS2 for `{patient_id}`: aggregate `{agg}/20`, band "
+            f"`{band}`{flag_text}."
+        )
+        contrib_bullets = [
+            f"- `{c.get('parameter', '?')}` "
+            f"value=`{c.get('value', '?')}` "
+            f"score=`{c.get('score', 0)}`"
+            for c in contributions
+            if int(c.get("score", 0) or 0) > 0
+        ]
+        lines = [header]
+        if contrib_bullets:
+            lines.append("Non-zero contributions:")
+            lines.extend(contrib_bullets[:7])
+        lines.append(f"Rationale: {rationale}")
+        body = "\n".join(lines)
+        return _with_disclosure(body, data), _data_source(data)
+
+    async def _handle_assess_pph(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """Run assess_pph_severity and format the CMQCC stage verdict."""
+        try:
+            raw = await self._mcp.call_tool(
+                "assess_pph_severity",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't assess PPH severity for `{patient_id}` "
+                f"because the MCP tool was unreachable: {e}.",
+                "fhir",
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="assess PPH severity")
+        if err is not None:
+            return err, _data_source(data)
+
+        stage = data.get("stage", 0)
+        ebl = data.get("cumulative_ebl_ml")
+        si = data.get("shock_index")
+        hgb = data.get("hemoglobin_g_dl")
+        fib = data.get("fibrinogen_mg_dl")
+        triggers = data.get("triggers") or []
+        actions = data.get("recommended_actions") or []
+        ebl_caveat = data.get("ebl_caveat")
+        rationale = data.get("rationale") or "no rationale provided"
+
+        ebl_str = f"`{ebl:.0f} mL`" if isinstance(ebl, (int, float)) else "`unmeasured`"
+        si_str = f"`{si:.2f}`" if isinstance(si, (int, float)) else "`?`"
+        hgb_str = (
+            f"`{hgb:.1f} g/dL`" if isinstance(hgb, (int, float)) else "`?`"
+        )
+        fib_str = (
+            f"`{fib:.0f} mg/dL`" if isinstance(fib, (int, float)) else "`?`"
+        )
+
+        header = (
+            f"PPH assessment for `{patient_id}`: CMQCC **Stage {stage}**. "
+            f"EBL {ebl_str}, shock index {si_str}, Hgb {hgb_str}, "
+            f"fibrinogen {fib_str}."
+        )
+        lines = [header]
+        if ebl_caveat:
+            lines.append(f"Caveat: {ebl_caveat}")
+        if triggers:
+            lines.append("Triggers:")
+            lines.extend(f"- {t}" for t in triggers[:5])
+        if actions:
+            lines.append("CMQCC recommended actions (verbatim):")
+            lines.extend(f"- {a}" for a in actions[:5])
+        lines.append(f"Rationale: {rationale}")
+        body = "\n".join(lines)
+        return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_start_watching(
         self,
@@ -635,9 +817,14 @@ def _with_disclosure(body: str, data: dict[str, Any]) -> str:
     is the public-facing receipt that PO's launchpad shows the operator
     when the workspace's FHIR server didn't accept our token. Live-data
     responses pass through unchanged.
+
+    The bundle name in the disclosure is selected by the inbound
+    ``patient_id`` so PT-010 (PPH cameo) reports its own bundle rather
+    than the default PT-007.
     """
     if _data_source(data) == SYNTHETIC_DATA_SOURCE:
-        return f"{synthetic_disclosure()}\n\n{body}"
+        pid = data.get("patient_id") if isinstance(data, dict) else None
+        return f"{synthetic_disclosure(pid)}\n\n{body}"
     return body
 
 

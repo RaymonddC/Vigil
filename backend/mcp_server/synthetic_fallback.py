@@ -61,19 +61,25 @@ LIVE_DATA_SOURCE = "fhir"
 # leaving headroom for clock skew.
 _RECENT_OFFSET = timedelta(minutes=5)
 
-# Bundle path — resolved once per import, evaluated against the repo
+# Bundle paths — resolved once per import, evaluated against the repo
 # layout so dev + container both work (the data directory ships next to
 # backend/ in the image).
-_PT007_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "patients" / "PT-007.json"
-)
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "patients"
+_PT007_PATH = _DATA_DIR / "PT-007.json"
+_PT010_PATH = _DATA_DIR / "PT-010.json"
 
-# Module-level cache — load the JSON once, then reuse across requests.
-# `_lock` keeps the first-load race-safe even if two MCP tool calls
-# arrive before the cache is populated.
+# Default bundle = PT-007 (deteriorating-postop trajectory). The PPH
+# skill (vigil.assess_pph_severity) targets PT-010 specifically; passing
+# patient_id="PT-010" to any of the get_synthetic_* helpers below loads
+# that bundle instead. Anything else falls through to PT-007.
+_DEFAULT_PATIENT_ID = "PT-007"
+
+# Module-level cache, keyed by patient_id — load each JSON once, then
+# reuse across requests. ``_lock`` keeps the first-load race-safe even
+# if two MCP tool calls arrive before the cache is populated.
 _lock = threading.Lock()
-_BUNDLE_CACHE: dict[str, Any] | None = None
-_MAX_OBS_TIME_CACHE: datetime | None = None
+_BUNDLE_CACHE: dict[str, dict[str, Any]] = {}
+_MAX_OBS_TIME_CACHE: dict[str, datetime] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -91,16 +97,22 @@ def is_fallback_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def synthetic_disclosure() -> str:
+def synthetic_disclosure(patient_id: str | None = None) -> str:
     """One-line honest disclosure for the agent's chat-friendly reply text.
 
     Used by the A2A skill handlers to prefix any response that was
     generated from synthetic data, so judges and downstream consumers
     can tell the data did not come from the live workspace.
+
+    The bundle name is included so the operator can tell exactly which
+    canned trajectory drove the response (PT-007 for the default
+    deteriorating-postop case, PT-010 for the postpartum hemorrhage
+    cameo invoked by ``vigil.assess_pph_severity``).
     """
+    bundle = _select_patient(patient_id)
     return (
         "Note: clinical context unavailable from FHIR — using bundled "
-        "demo trajectory (PT-007)."
+        f"demo trajectory ({bundle})."
     )
 
 
@@ -120,31 +132,48 @@ def synthetic_breach_caveat() -> str:
 def reset_for_tests() -> None:
     """Clear the bundle cache. Tests use this to force a fresh load
     after monkey-patching or after re-seeding the JSON file."""
-    global _BUNDLE_CACHE, _MAX_OBS_TIME_CACHE
     with _lock:
-        _BUNDLE_CACHE = None
-        _MAX_OBS_TIME_CACHE = None
+        _BUNDLE_CACHE.clear()
+        _MAX_OBS_TIME_CACHE.clear()
 
 
-def get_synthetic_patient() -> Patient:
-    """Return PT-007's :class:`Patient` resource (no time-shift needed)."""
-    items = _resources_of_type("Patient")
+def _select_patient(patient_id: str | None) -> str:
+    """Map an inbound patient_id to the bundle key.
+
+    PT-010 is the only patient with a dedicated bundle (postpartum
+    hemorrhage trajectory used by the PPH skill). Everyone else falls
+    through to the PT-007 deteriorating-postop trajectory — that's
+    intentional: PT-007 is the canonical demo patient and the synthetic
+    disclosure narrative names it explicitly.
+    """
+    if patient_id == "PT-010":
+        return "PT-010"
+    return _DEFAULT_PATIENT_ID
+
+
+def get_synthetic_patient(patient_id: str | None = None) -> Patient:
+    """Return the bundled :class:`Patient` resource (no time-shift needed)."""
+    pid = _select_patient(patient_id)
+    items = _resources_of_type("Patient", pid)
     if not items:
         raise RuntimeError(
-            "PT-007 bundle missing Patient resource — regenerate via "
+            f"{pid} bundle missing Patient resource — regenerate via "
             "data/seed_hapi.py --generate-only."
         )
     return Patient.model_validate(items[0])
 
 
-def get_synthetic_encounter() -> Encounter | None:
-    """Return PT-007's most recent :class:`Encounter`, or None.
+def get_synthetic_encounter(
+    patient_id: str | None = None,
+) -> Encounter | None:
+    """Return the bundle's most recent :class:`Encounter`, or None.
 
-    PT-007's bundle has exactly one in-progress Encounter; if the
-    bundle is ever regenerated to omit it, callers must tolerate None
-    (matches the live :func:`FhirClient.get_encounter` contract).
+    Each bundled trajectory has exactly one in-progress Encounter; if
+    a future bundle omits it, callers must tolerate None (matches the
+    live :func:`FhirClient.get_encounter` contract).
     """
-    items = _resources_of_type("Encounter")
+    pid = _select_patient(patient_id)
+    items = _resources_of_type("Encounter", pid)
     if not items:
         return None
     return Encounter.model_validate(items[0])
@@ -152,18 +181,22 @@ def get_synthetic_encounter() -> Encounter | None:
 
 def get_synthetic_observations(
     category: str | None = None,
+    patient_id: str | None = None,
 ) -> list[Observation]:
-    """Return PT-007's Observations, time-shifted, sorted newest-first.
+    """Return the bundle's Observations, time-shifted, sorted newest-first.
 
     ``category`` filters by :attr:`Observation.category_code` (e.g.
     ``"vital-signs"`` or ``"laboratory"``) to mirror
     :meth:`FhirClient.get_observations`'s ``category`` query parameter.
-    Sort order matches HAPI's ``_sort=-date``.
+    ``patient_id`` selects which bundle to load (PT-010 → PPH bundle,
+    everything else → PT-007 default). Sort order matches HAPI's
+    ``_sort=-date``.
     """
-    offset = _rebase_offset()
+    pid = _select_patient(patient_id)
+    offset = _rebase_offset(pid)
     raws = [
         _shift_observation(r, offset)
-        for r in _resources_of_type("Observation")
+        for r in _resources_of_type("Observation", pid)
     ]
     obs = [Observation.model_validate(r) for r in raws]
 
@@ -178,32 +211,31 @@ def get_synthetic_observations(
     return obs
 
 
-def get_synthetic_conditions() -> list[Condition]:
-    """Return PT-007's Conditions (T2DM + CKD3 — both active, no time shift).
+def get_synthetic_conditions(
+    patient_id: str | None = None,
+) -> list[Condition]:
+    """Return the bundle's Conditions (no time shift).
 
     Conditions are time-independent; we surface them verbatim so the
     risk score's ``contributing_conditions`` field reflects the
     bundled comorbidities.
     """
+    pid = _select_patient(patient_id)
     return [
         Condition.model_validate(r)
-        for r in _resources_of_type("Condition")
+        for r in _resources_of_type("Condition", pid)
     ]
 
 
-def get_synthetic_medication_administrations() -> list[MedicationAdministration]:
-    """Return PT-007's MedicationAdministration with timestamps rebased.
-
-    PT-007 has only the pre-op cefazolin dose — well outside the CDC
-    ASE empiric-antibiotic window after rebasing. That's intentional:
-    PT-007 is the deteriorating-but-not-yet-septic case, so the sepsis
-    tool will return ``sepsis_suspected=false`` with real reasoning
-    (organ-dysfunction lab values, but no presumed infection signal).
-    """
-    offset = _rebase_offset()
+def get_synthetic_medication_administrations(
+    patient_id: str | None = None,
+) -> list[MedicationAdministration]:
+    """Return the bundle's MedicationAdministration with timestamps rebased."""
+    pid = _select_patient(patient_id)
+    offset = _rebase_offset(pid)
     raws = [
         _shift_observation(r, offset)
-        for r in _resources_of_type("MedicationAdministration")
+        for r in _resources_of_type("MedicationAdministration", pid)
     ]
     return [MedicationAdministration.model_validate(r) for r in raws]
 
@@ -213,21 +245,30 @@ def get_synthetic_medication_administrations() -> list[MedicationAdministration]
 # ---------------------------------------------------------------------------
 
 
-def _load_pt007_bundle() -> dict[str, Any]:
-    """Read ``PT-007.json`` once, cache the parsed dict + max-obs-time.
+def _bundle_path(patient_id: str) -> Path:
+    """Resolve the JSON path for a known synthetic bundle id."""
+    if patient_id == "PT-010":
+        return _PT010_PATH
+    return _PT007_PATH
+
+
+def _load_bundle(patient_id: str) -> dict[str, Any]:
+    """Read the bundle JSON once, cache the parsed dict + max-obs-time.
 
     Race-safe under threading; the cache is populated under ``_lock`` so
     two simultaneous first-callers don't both hit the disk.
     """
-    global _BUNDLE_CACHE, _MAX_OBS_TIME_CACHE
-    if _BUNDLE_CACHE is not None:
-        return _BUNDLE_CACHE
+    cached = _BUNDLE_CACHE.get(patient_id)
+    if cached is not None:
+        return cached
 
     with _lock:
-        if _BUNDLE_CACHE is not None:  # double-checked locking
-            return _BUNDLE_CACHE
+        cached = _BUNDLE_CACHE.get(patient_id)
+        if cached is not None:  # double-checked locking
+            return cached
 
-        with _PT007_PATH.open("r", encoding="utf-8") as fh:
+        path = _bundle_path(patient_id)
+        with path.open("r", encoding="utf-8") as fh:
             bundle = json.load(fh)
 
         max_t: datetime | None = None
@@ -240,16 +281,18 @@ def _load_pt007_bundle() -> dict[str, Any]:
             if max_t is None or ts > max_t:
                 max_t = ts
 
-        _BUNDLE_CACHE = bundle
+        _BUNDLE_CACHE[patient_id] = bundle
         # Fall back to "now" if the bundle has no timestamps at all —
         # rebasing then becomes a no-op, which is the safe default.
-        _MAX_OBS_TIME_CACHE = max_t or datetime.now(UTC)
-        return _BUNDLE_CACHE
+        _MAX_OBS_TIME_CACHE[patient_id] = max_t or datetime.now(UTC)
+        return bundle
 
 
-def _resources_of_type(rtype: str) -> list[dict[str, Any]]:
+def _resources_of_type(
+    rtype: str, patient_id: str = _DEFAULT_PATIENT_ID,
+) -> list[dict[str, Any]]:
     """Filter the bundle's entries by FHIR ``resourceType``."""
-    bundle = _load_pt007_bundle()
+    bundle = _load_bundle(patient_id)
     out: list[dict[str, Any]] = []
     for entry in bundle.get("entry", []):
         if not isinstance(entry, dict):
@@ -260,7 +303,7 @@ def _resources_of_type(rtype: str) -> list[dict[str, Any]]:
     return out
 
 
-def _rebase_offset() -> timedelta:
+def _rebase_offset(patient_id: str = _DEFAULT_PATIENT_ID) -> timedelta:
     """Return the timedelta that shifts the bundle's most-recent sample
     to ``now - _RECENT_OFFSET``.
 
@@ -268,9 +311,9 @@ def _rebase_offset() -> timedelta:
     process always anchor to "now" — important for long-running agent
     deployments where the cache may persist for hours.
     """
-    _load_pt007_bundle()  # ensures _MAX_OBS_TIME_CACHE is set
+    _load_bundle(patient_id)  # ensures cache is set
     target = datetime.now(UTC) - _RECENT_OFFSET
-    base = _MAX_OBS_TIME_CACHE or target
+    base = _MAX_OBS_TIME_CACHE.get(patient_id) or target
     return target - base
 
 

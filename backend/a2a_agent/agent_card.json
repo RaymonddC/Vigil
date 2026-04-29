@@ -67,6 +67,24 @@
       "name": "Start autonomous watching",
       "description": "Begins background monitoring for the named patient. Optional. Demo-only.",
       "tags": ["watch", "monitor"]
+    },
+    {
+      "id": "vigil.assess_postop_aki",
+      "name": "Assess postoperative AKI (KDIGO-staged)",
+      "description": "Stages acute kidney injury (KDIGO 0–3) from serial creatinine + 24h urine output. Imputes baseline creatinine as the lowest value in the past 7 days when none is supplied (KDIGO 2012 §3.1.2) and surfaces the imputation explicitly. Returns time-to-intervention recommendation per SCCM 2017 (Joannidis et al, Intensive Care Med 2017;43:730).",
+      "tags": ["aki", "kidney", "creatinine", "kdigo", "renal"]
+    },
+    {
+      "id": "vigil.score_news2",
+      "name": "Score NEWS2 (RCP 2017)",
+      "description": "Computes the National Early Warning Score 2 (Royal College of Physicians 2017) — a second-opinion deterioration score alongside qSOFA. Returns aggregate 0–20, band {low, low-medium, medium, high}, red-flag boolean (any single parameter scoring 3), and per-parameter contributions.",
+      "tags": ["news2", "early warning", "deterioration", "rcp"]
+    },
+    {
+      "id": "vigil.assess_pph_severity",
+      "name": "Assess postpartum hemorrhage severity (CMQCC)",
+      "description": "Stages postpartum hemorrhage 0–3 per CMQCC OB Hemorrhage Toolkit v3.0 with ACOG Practice Bulletin 183 (2017) cumulative-EBL definition. Inputs: cumulative EBL (LOINC 55758-7), HR, SBP, fibrinogen, hemoglobin trend. Returns stage, shock index (HR/SBP), triggers list, and the verbatim CMQCC uterotonic-and-action ladder. When EBL is unmeasured, degrades to shock-index-only with explicit ACOG CO 794 caveat.",
+      "tags": ["pph", "postpartum", "hemorrhage", "cmqcc", "obstetric"]
     }
   ],
   "securitySchemes": {

@@ -617,6 +617,197 @@ class EscalationOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 1.5  assess_postop_aki  — KDIGO-staged AKI verdict
+# ---------------------------------------------------------------------------
+
+
+class AssessAkiOutput(BaseModel):
+    """Output for ``assess_postop_aki``.
+
+    KDIGO-staged AKI verdict using serial creatinine (LOINC 2160-0) and
+    24-hour urine output (LOINC 9192-6). Cites SCCM 2017 (Joannidis
+    et al, ICM 2017;43:730) for the time-to-intervention recommendation.
+
+    When no explicit ``creatinine_baseline`` is available, the tool
+    imputes baseline as the lowest creatinine in the past 7 days
+    (KDIGO 2012 §3.1.2 imputation rule). ``baseline_imputed=True``
+    surfaces this so reviewers can probe — never fudge silently.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "triggered",
+                    "patient_id": "PT-007",
+                    "kdigo_stage": 2,
+                    "criteria_met": [
+                        "SCr 2.1 is 2.3x baseline 0.9 (2.0-2.9x)",
+                    ],
+                    "creatinine_current": 2.1,
+                    "creatinine_baseline": 0.9,
+                    "baseline_imputed": True,
+                    "baseline_source": (
+                        "lowest creatinine in past 7d (KDIGO 2012 §3.1.2)"
+                    ),
+                    "urine_output_ml_kg_h": None,
+                    "oliguria_hours": None,
+                    "time_to_intervention_hours": 6,
+                    "rationale": (
+                        "KDIGO Stage 2; SCr 2.1 is 2.3x baseline 0.9."
+                    ),
+                    "data_source": "fhir",
+                }
+            ]
+        },
+    )
+
+    status: ToolStatus
+    patient_id: str
+    kdigo_stage: int = Field(ge=0, le=3)
+    criteria_met: list[str]
+    creatinine_current: float | None
+    creatinine_baseline: float | None
+    baseline_imputed: bool
+    baseline_source: str
+    urine_output_ml_kg_h: float | None
+    oliguria_hours: float | None
+    time_to_intervention_hours: int | None = Field(
+        default=None,
+        description=(
+            "Recommended time-to-intervention per SCCM 2017 (Joannidis "
+            "et al, ICM 2017): None for stage 0, 12h for stage 1, 6h for "
+            "stage 2, immediate (0h) for stage 3."
+        ),
+    )
+    rationale: str
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
+
+
+# ---------------------------------------------------------------------------
+# 1.6  score_news2  — NEWS2 second-opinion deterioration score
+# ---------------------------------------------------------------------------
+
+
+class News2ParameterContribution(BaseModel):
+    """Single-parameter NEWS2 contribution row.
+
+    Per RCP 2017 NEWS2 chart: each parameter contributes 0–3 points.
+    A single parameter scoring 3 is the ``red_flag`` per RCP guidance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    parameter: str
+    value: float | None
+    score: int = Field(ge=0, le=3)
+
+
+class ScoreNews2Output(BaseModel):
+    """Output for ``score_news2``.
+
+    NEWS2 (Royal College of Physicians 2017) — second-opinion to qSOFA.
+    Aggregate 0–20, banded {low, low-medium, medium, high} per RCP.
+    ``red_flag`` true iff any single parameter scores 3.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "triggered",
+                    "patient_id": "PT-007",
+                    "aggregate_score": 7,
+                    "band": "high",
+                    "red_flag": True,
+                    "parameter_contributions": [
+                        {"parameter": "RR", "value": 24.0, "score": 3},
+                        {"parameter": "SBP", "value": 88.0, "score": 3},
+                    ],
+                    "supplemental_o2": False,
+                    "rationale": "NEWS2=7 (high). Red flag: RR=24, SBP=88.",
+                    "data_source": "fhir",
+                }
+            ]
+        },
+    )
+
+    status: ToolStatus
+    patient_id: str
+    aggregate_score: int = Field(ge=0, le=20)
+    band: Literal["low", "low-medium", "medium", "high"]
+    red_flag: bool
+    parameter_contributions: list[News2ParameterContribution]
+    supplemental_o2: bool
+    rationale: str
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
+
+
+# ---------------------------------------------------------------------------
+# 1.7  assess_pph_severity  — CMQCC postpartum hemorrhage staging
+# ---------------------------------------------------------------------------
+
+
+class AssessPphOutput(BaseModel):
+    """Output for ``assess_pph_severity``.
+
+    CMQCC OB Hemorrhage Toolkit v3.0 staging plus ACOG Practice Bulletin
+    183 (2017) cumulative-EBL definition. ``recommended_actions`` is the
+    verbatim CMQCC ladder text (NOT LLM-generated) — keep it that way.
+
+    When EBL is not measured, the tool degrades to shock-index-only with
+    an explicit caveat — visual EBL inflates ~30% per ACOG Committee
+    Opinion 794.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "triggered",
+                    "patient_id": "PT-010",
+                    "stage": 3,
+                    "cumulative_ebl_ml": 2050.0,
+                    "ebl_route": "vaginal",
+                    "shock_index": 1.61,
+                    "hemoglobin_g_dl": 7.2,
+                    "fibrinogen_mg_dl": 175.0,
+                    "triggers": [
+                        "EBL 2050 mL ≥1500 (Stage 3)",
+                        "Shock index 1.61 ≥1.4 (Stage 3)",
+                        "Fibrinogen 175 mg/dL <200 (Stage 3)",
+                    ],
+                    "recommended_actions": [
+                        "Activate massive transfusion protocol",
+                        "Mobilize OR/IR for surgical/embolization control",
+                    ],
+                    "ebl_caveat": None,
+                    "rationale": "CMQCC Stage 3.",
+                    "data_source": "fhir",
+                }
+            ]
+        },
+    )
+
+    status: ToolStatus
+    patient_id: str
+    stage: int = Field(ge=0, le=3)
+    cumulative_ebl_ml: float | None
+    ebl_route: Literal["vaginal", "cesarean", "unknown"]
+    shock_index: float | None
+    hemoglobin_g_dl: float | None
+    fibrinogen_mg_dl: float | None
+    triggers: list[str]
+    recommended_actions: list[str]
+    ebl_caveat: str | None
+    rationale: str
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
+
+
+# ---------------------------------------------------------------------------
 # 6.4  Approve endpoint
 # ---------------------------------------------------------------------------
 
