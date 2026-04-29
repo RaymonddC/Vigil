@@ -46,6 +46,10 @@ TP_TIMES: dict[str, str] = {
     "T4": _Z(_T0_DT + timedelta(hours=4)),
     "T6": _Z(_T0_DT + timedelta(hours=6)),
     "T8": _Z(_T0_DT + timedelta(hours=8)),
+    # T9 — used by per-patient EXTRA_VITAL_OBS / EXTRA_LAB_OBS to surface
+    # post-trajectory readings (e.g. PT-007's late SpO2 dip that anchors
+    # the opioid_resp_depression treatment-conflict rule).
+    "T9": _Z(_T0_DT + timedelta(hours=9)),
 }
 TP_ORDER = ["T0", "T1", "T2", "T4", "T6", "T8"]
 LAB_TPS  = ["T0", "T4", "T8"]
@@ -248,12 +252,98 @@ MEDS: dict[str, list[tuple[str, str, float, str, str]]] = {
     "PT-004": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30)],
     "PT-005": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30)],
     "PT-006": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30)],
-    "PT-007": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30)],
+    "PT-007": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30),
+               # T+8h morphine push — pairs with the active MedicationRequest
+               # below so flag_treatment_conflicts.opioid_resp_depression has
+               # a recent administration to anchor the 4h post-dose window.
+               ("Morphine 4 mg IV",                  "1731341", 4.0, "mg",
+                _Z(_T0_DT + timedelta(hours=8)))],
     "PT-008": [("Cefazolin 1 g IV",                 "309264",  1.0, "g", PREOP_M30),
                ("Piperacillin-tazobactam 4.5 g IV", "203134",  4.5, "g", POST_ONSET_PT008)],
     "PT-009": [("Cefazolin 2 g IV",                 "309264",  2.0, "g", PREOP_M15),
                ("Ampicillin-sulbactam 3 g IV",       "1659149", 3.0, "g", POST_ONSET_PT009)],
     "PT-010": [("Cefazolin 2 g IV",                 "309264",  2.0, "g", PREOP_M15)],
+}
+
+# ── Active medication orders per patient (§5.1.3 — flag_treatment_conflicts) ──
+# Format: (drug_display, rxnorm_code, dose_text, authored_offset_from_T0)
+# Each entry becomes an active ``MedicationRequest`` so the treatment-conflict
+# rule engine can detect "drug-on-board vs physiology" conflicts. The
+# ``authored_offset`` is added to T0 so timing matches the trajectory windows
+# (e.g. ibuprofen ordered after the post-op AKI bumps creatinine).
+#
+# Each MedicationRequest is paired with the rule it lights up on the demo
+# trajectory:
+#   PT-007  morphine    → opioid_resp_depression  (SpO2 90 / RR 23 at T+8/9)
+#   PT-007  metoprolol  → bblocker_brady_hypo     (SBP 88 < 90 at T+8)
+#   PT-008  ibuprofen   → nsaid_aki               (KDIGO 2 from Cr 0.9→1.9)
+#   PT-008  lisinopril  → ace_arb_hyperk          (K+ 5.7 at T+8, see EXTRA_LAB_OBS)
+#   PT-010  enoxaparin  → anticoag_hgb_drop       (Hgb 12.4→7.2)
+MED_REQUESTS: dict[str, list[tuple[str, str, str, timedelta]]] = {
+    "PT-007": [
+        ("Morphine sulfate 4 mg IV q4h prn pain",
+         "1731341",
+         "4 mg IV q4h prn moderate-severe pain",
+         timedelta(hours=8)),
+        # β-blocker order on a hypotensive patient — fires
+        # bblocker_brady_hypo at warning severity (SBP 88 < 90 but ≥85).
+        ("Metoprolol tartrate 25 mg po bid",
+         "866427",
+         "25 mg po bid — HR/BP control",
+         timedelta(hours=7)),
+    ],
+    "PT-008": [
+        ("Ibuprofen 600 mg po q6h prn",
+         "5640",
+         "600 mg po q6h prn pain — surgical-team standing order",
+         timedelta(hours=6)),
+        # ACE-I order on a sepsis-trajectory patient with hyperkalemia —
+        # fires ace_arb_hyperk at warning severity (K+ 5.7, <6.0).
+        ("Lisinopril 10 mg po qd",
+         "314076",
+         "10 mg po qd — chronic HTN management resumed",
+         timedelta(hours=5)),
+    ],
+    "PT-010": [
+        ("Enoxaparin 40 mg subq q24h (VTE prophylaxis)",
+         "67108",
+         "40 mg subq q24h — postpartum VTE prophylaxis",
+         timedelta(hours=7, minutes=30)),
+    ],
+}
+
+# ── Per-patient extra lab observations (§5.1.4) ───────────────────────────────
+# Lab measurements outside the standard trajectory ``LABS`` panel — used to
+# pin specific treatment-conflict rule triggers without polluting other
+# patients on the same trajectory.
+# Format: list of (timepoint_key, lab_key, value)
+EXTRA_LAB_OBS: dict[str, list[tuple[str, str, float]]] = {
+    # PT-008: K+ baseline + late-trajectory hyperkalemia — anchors
+    # ace_arb_hyperk rule.  PT-009 also runs the sepsis trajectory but
+    # doesn't get this — keep the K+ scoped here so the postpartum
+    # endometritis case stays clean.
+    "PT-008": [("T0", "K", 4.5), ("T8", "K", 5.7)],
+    # PT-010: fibrinogen trend — hits the PPH stage-3 trigger
+    # (assess_pph_severity) at T+8h with fibrinogen 175 mg/dL <200.
+    "PT-010": [("T0", "Fibrinogen", 320.0),
+               ("T4", "Fibrinogen", 220.0),
+               ("T8", "Fibrinogen", 175.0)],
+}
+
+# ── Per-patient extra vital observations (§5.1.5) ─────────────────────────────
+# Vital readings outside the standard trajectory grid.  Mirrors EXTRA_LAB_OBS
+# but for vital-signs category Observations; supports optional nursing notes
+# so the trajectory's narrative breadcrumb stays attached.
+# Format: list of (timepoint_key, vital_key, value, note_or_None)
+EXTRA_VITAL_OBS: dict[str, list[tuple[str, str, float, str | None]]] = {
+    # PT-007: T+9h SpO2 dip after the morphine bolus — anchors the
+    # opioid_resp_depression rule on the demo trajectory.  Without this
+    # the latest SpO2 (T+8h = 93%) sits above the 92% trigger.
+    "PT-007": [(
+        "T9", "SpO2", 90,
+        "SpO2 trending down post-morphine; consider opioid-induced "
+        "respiratory depression.",
+    )],
 }
 
 # ── LOINC + unit maps ──────────────────────────────────────────────────────────
@@ -276,6 +366,15 @@ LAB_LOINC: dict[str, tuple[str, str, str]] = {
     "Bili":    ("1975-2",  "Bilirubin.total [Mass/volume]",    "mg/dL"),
     "Plt":     ("777-3",   "Platelets [#/volume] in Blood",    "10*3/uL"),
     "Hgb":     ("718-7",   "Hemoglobin [Mass/volume] in Blood","g/dL"),
+    # Potassium — used by EXTRA_LAB_OBS to anchor the ACE-I/ARB +
+    # hyperkalemia treatment-conflict rule without polluting the
+    # baseline trajectory's panel.
+    "K":       ("2823-3",  "Potassium [Moles/volume] in Serum or Plasma",
+                "mmol/L"),
+    # Fibrinogen — drives PPH stage 3 trigger via the assess_pph_severity
+    # rule.  Scoped to PT-010 only via EXTRA_LAB_OBS.
+    "Fibrinogen": ("3255-7", "Fibrinogen [Mass/volume] in Platelet poor plasma",
+                   "mg/dL"),
 }
 
 # ── FHIR resource builders ────────────────────────────────────────────────────
@@ -414,6 +513,32 @@ def make_med_admin(pt_id: str, drug_display: str, rxnorm: str,
     }
 
 
+def make_med_request(pt_id: str, drug_display: str, rxnorm: str,
+                     dosage_text: str, authored_time: str,
+                     req_idx: int) -> dict:
+    """Build an active MedicationRequest used by flag_treatment_conflicts.
+
+    Active orders are the forward-looking signal the engine wants — they
+    represent drugs the team is about to give, not just ones already in
+    the bloodstream.  ``status="active"`` and ``intent="order"`` are
+    required for ``_active_requests`` in the rule engine to pick it up.
+    """
+    return {
+        "resourceType": "MedicationRequest",
+        "id": f"MEDREQ-{pt_id}-{req_idx}",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+            "coding": [{"system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                        "code": rxnorm, "display": drug_display}],
+            "text": drug_display,
+        },
+        "subject": {"reference": f"Patient/{pt_id}"},
+        "authoredOn": authored_time,
+        "dosageInstruction": [{"text": dosage_text}],
+    }
+
+
 # ── Bundle assembly ───────────────────────────────────────────────────────────
 
 def _entry(resource: dict) -> dict:
@@ -462,6 +587,18 @@ def build_patient_bundle(pt: dict) -> dict:
         for lk, val in lab_row.items():
             entries.append(_entry(make_lab_obs(pt_id, tp, lk, val)))
 
+    # Per-patient extra lab observations (e.g. K+ for PT-008's ACE-I/hyperK
+    # rule, fibrinogen for PT-010's PPH stage-3 trigger). Kept separate
+    # from the trajectory panel so each rule fixture stays scoped to the
+    # patient that actually needs it.
+    for tp_key, lk, val in EXTRA_LAB_OBS.get(pt_id, []):
+        entries.append(_entry(make_lab_obs(pt_id, tp_key, lk, val)))
+
+    # Per-patient extra vital observations (e.g. PT-007's T+9h SpO2 dip
+    # that lights up the opioid_resp_depression conflict rule).
+    for tp_key, vk, val, note in EXTRA_VITAL_OBS.get(pt_id, []):
+        entries.append(_entry(make_vital_obs(pt_id, tp_key, vk, val, note)))
+
     # Conditions
     for cidx, (snomed, display, rec_date) in enumerate(CONDITIONS.get(pt_id, [])):
         entries.append(_entry(make_condition(pt_id, snomed, display, rec_date, cidx + 1)))
@@ -472,6 +609,15 @@ def build_patient_bundle(pt: dict) -> dict:
     ):
         entries.append(_entry(make_med_admin(pt_id, drug, rxnorm, dose_val,
                                              dose_unit, eff_time, midx + 1)))
+
+    # Medication requests (active orders — used by flag_treatment_conflicts)
+    for ridx, (drug, rxnorm, dosage_text, authored_offset) in enumerate(
+        MED_REQUESTS.get(pt_id, [])
+    ):
+        authored_time = _Z(_T0_DT + authored_offset)
+        entries.append(_entry(make_med_request(pt_id, drug, rxnorm,
+                                               dosage_text, authored_time,
+                                               ridx + 1)))
 
     return {
         "resourceType": "Bundle",

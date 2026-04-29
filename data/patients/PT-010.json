@@ -59,7 +59,7 @@
           "reference": "Patient/PT-010"
         },
         "period": {
-          "start": "2026-04-27T03:39:50Z"
+          "start": "2026-04-29T00:47:40Z"
         }
       },
       "request": {
@@ -88,7 +88,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "performedDateTime": "2026-04-27T05:09:50Z"
+        "performedDateTime": "2026-04-29T02:17:40Z"
       },
       "request": {
         "method": "PUT",
@@ -128,7 +128,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 118,
           "unit": "mm[Hg]",
@@ -174,7 +174,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 74,
           "unit": "mm[Hg]",
@@ -220,7 +220,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 84,
           "unit": "/min",
@@ -266,7 +266,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 16,
           "unit": "/min",
@@ -312,7 +312,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 99,
           "unit": "%",
@@ -358,7 +358,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 36.9,
           "unit": "Cel",
@@ -404,7 +404,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 45,
           "unit": "mL/h",
@@ -455,7 +455,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 300,
           "unit": "mL",
@@ -501,7 +501,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 108,
           "unit": "mm[Hg]",
@@ -547,7 +547,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 68,
           "unit": "mm[Hg]",
@@ -593,7 +593,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 104,
           "unit": "/min",
@@ -639,7 +639,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 18,
           "unit": "/min",
@@ -685,7 +685,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 98,
           "unit": "%",
@@ -731,7 +731,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 36.8,
           "unit": "Cel",
@@ -777,7 +777,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 30,
           "unit": "mL/h",
@@ -828,7 +828,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T06:39:50Z",
+        "effectiveDateTime": "2026-04-29T03:47:40Z",
         "valueQuantity": {
           "value": 650,
           "unit": "mL",
@@ -874,7 +874,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 88,
           "unit": "mm[Hg]",
@@ -920,7 +920,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 52,
           "unit": "mm[Hg]",
@@ -966,7 +966,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 124,
           "unit": "/min",
@@ -1012,7 +1012,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 22,
           "unit": "/min",
@@ -1058,7 +1058,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 96,
           "unit": "%",
@@ -1104,7 +1104,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 36.6,
           "unit": "Cel",
@@ -1150,7 +1150,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 18,
           "unit": "mL/h",
@@ -1201,7 +1201,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T07:39:50Z",
+        "effectiveDateTime": "2026-04-29T04:47:40Z",
         "valueQuantity": {
           "value": 1200,
           "unit": "mL",
@@ -1247,7 +1247,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 82,
           "unit": "mm[Hg]",
@@ -1293,7 +1293,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 48,
           "unit": "mm[Hg]",
@@ -1339,7 +1339,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 132,
           "unit": "/min",
@@ -1385,7 +1385,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 24,
           "unit": "/min",
@@ -1431,7 +1431,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 94,
           "unit": "%",
@@ -1477,7 +1477,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 36.4,
           "unit": "Cel",
@@ -1523,7 +1523,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 8,
           "unit": "mL/h",
@@ -1574,7 +1574,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 1800,
           "unit": "mL",
@@ -1620,7 +1620,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 86,
           "unit": "mm[Hg]",
@@ -1666,7 +1666,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 50,
           "unit": "mm[Hg]",
@@ -1712,7 +1712,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 128,
           "unit": "/min",
@@ -1758,7 +1758,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 22,
           "unit": "/min",
@@ -1804,7 +1804,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 95,
           "unit": "%",
@@ -1850,7 +1850,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 36.5,
           "unit": "Cel",
@@ -1896,7 +1896,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 12,
           "unit": "mL/h",
@@ -1947,7 +1947,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T11:39:50Z",
+        "effectiveDateTime": "2026-04-29T08:47:40Z",
         "valueQuantity": {
           "value": 2000,
           "unit": "mL",
@@ -1993,7 +1993,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 92,
           "unit": "mm[Hg]",
@@ -2039,7 +2039,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 56,
           "unit": "mm[Hg]",
@@ -2085,7 +2085,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 116,
           "unit": "/min",
@@ -2131,7 +2131,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 20,
           "unit": "/min",
@@ -2177,7 +2177,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 97,
           "unit": "%",
@@ -2223,7 +2223,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 36.6,
           "unit": "Cel",
@@ -2269,7 +2269,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 22,
           "unit": "mL/h",
@@ -2320,7 +2320,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 2050,
           "unit": "mL",
@@ -2366,7 +2366,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 1.6,
           "unit": "mmol/L",
@@ -2412,7 +2412,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 11.2,
           "unit": "10*3/uL",
@@ -2458,7 +2458,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 0.8,
           "unit": "mg/dL",
@@ -2504,7 +2504,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 0.6,
           "unit": "mg/dL",
@@ -2550,7 +2550,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 225,
           "unit": "10*3/uL",
@@ -2596,7 +2596,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
           "value": 12.4,
           "unit": "g/dL",
@@ -2642,7 +2642,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 3.2,
           "unit": "mmol/L",
@@ -2688,7 +2688,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 13.8,
           "unit": "10*3/uL",
@@ -2734,7 +2734,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 1.0,
           "unit": "mg/dL",
@@ -2780,7 +2780,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 0.7,
           "unit": "mg/dL",
@@ -2826,7 +2826,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 185,
           "unit": "10*3/uL",
@@ -2872,7 +2872,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
           "value": 7.2,
           "unit": "g/dL",
@@ -2918,7 +2918,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 2.4,
           "unit": "mmol/L",
@@ -2964,7 +2964,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 12.4,
           "unit": "10*3/uL",
@@ -3010,7 +3010,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 0.9,
           "unit": "mg/dL",
@@ -3056,7 +3056,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 0.7,
           "unit": "mg/dL",
@@ -3102,7 +3102,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 192,
           "unit": "10*3/uL",
@@ -3148,7 +3148,7 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
           "value": 9.8,
           "unit": "g/dL",
@@ -3162,10 +3162,10 @@
       }
     },
     {
-      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T0-FIB",
+      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T0-Fibrinogen",
       "resource": {
         "resourceType": "Observation",
-        "id": "OBS-PT-010-T0-FIB",
+        "id": "OBS-PT-010-T0-Fibrinogen",
         "status": "final",
         "category": [
           {
@@ -3183,7 +3183,7 @@
             {
               "system": "http://loinc.org",
               "code": "3255-7",
-              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay"
+              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma"
             }
           ],
           "text": "Fibrinogen"
@@ -3194,9 +3194,9 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:39:50Z",
+        "effectiveDateTime": "2026-04-29T02:47:40Z",
         "valueQuantity": {
-          "value": 320,
+          "value": 320.0,
           "unit": "mg/dL",
           "system": "http://unitsofmeasure.org",
           "code": "mg/dL"
@@ -3204,14 +3204,14 @@
       },
       "request": {
         "method": "PUT",
-        "url": "Observation/OBS-PT-010-T0-FIB"
+        "url": "Observation/OBS-PT-010-T0-Fibrinogen"
       }
     },
     {
-      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T4-FIB",
+      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T4-Fibrinogen",
       "resource": {
         "resourceType": "Observation",
-        "id": "OBS-PT-010-T4-FIB",
+        "id": "OBS-PT-010-T4-Fibrinogen",
         "status": "final",
         "category": [
           {
@@ -3229,7 +3229,7 @@
             {
               "system": "http://loinc.org",
               "code": "3255-7",
-              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay"
+              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma"
             }
           ],
           "text": "Fibrinogen"
@@ -3240,9 +3240,9 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T09:39:50Z",
+        "effectiveDateTime": "2026-04-29T06:47:40Z",
         "valueQuantity": {
-          "value": 220,
+          "value": 220.0,
           "unit": "mg/dL",
           "system": "http://unitsofmeasure.org",
           "code": "mg/dL"
@@ -3250,14 +3250,14 @@
       },
       "request": {
         "method": "PUT",
-        "url": "Observation/OBS-PT-010-T4-FIB"
+        "url": "Observation/OBS-PT-010-T4-Fibrinogen"
       }
     },
     {
-      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T8-FIB",
+      "fullUrl": "urn:uuid:Observation-OBS-PT-010-T8-Fibrinogen",
       "resource": {
         "resourceType": "Observation",
-        "id": "OBS-PT-010-T8-FIB",
+        "id": "OBS-PT-010-T8-Fibrinogen",
         "status": "final",
         "category": [
           {
@@ -3275,7 +3275,7 @@
             {
               "system": "http://loinc.org",
               "code": "3255-7",
-              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay"
+              "display": "Fibrinogen [Mass/volume] in Platelet poor plasma"
             }
           ],
           "text": "Fibrinogen"
@@ -3286,9 +3286,9 @@
         "encounter": {
           "reference": "Encounter/ENC-PT-010"
         },
-        "effectiveDateTime": "2026-04-27T13:39:50Z",
+        "effectiveDateTime": "2026-04-29T10:47:40Z",
         "valueQuantity": {
-          "value": 175,
+          "value": 175.0,
           "unit": "mg/dL",
           "system": "http://unitsofmeasure.org",
           "code": "mg/dL"
@@ -3296,7 +3296,7 @@
       },
       "request": {
         "method": "PUT",
-        "url": "Observation/OBS-PT-010-T8-FIB"
+        "url": "Observation/OBS-PT-010-T8-Fibrinogen"
       }
     },
     {
@@ -3437,7 +3437,7 @@
         "subject": {
           "reference": "Patient/PT-010"
         },
-        "effectiveDateTime": "2026-04-27T05:24:50Z",
+        "effectiveDateTime": "2026-04-29T02:32:40Z",
         "dosage": {
           "dose": {
             "value": 2.0,
@@ -3476,15 +3476,15 @@
               "display": "Enoxaparin 40 mg subq q24h (VTE prophylaxis)"
             }
           ],
-          "text": "Enoxaparin 40 mg subq q24h"
+          "text": "Enoxaparin 40 mg subq q24h (VTE prophylaxis)"
         },
         "subject": {
           "reference": "Patient/PT-010"
         },
-        "authoredOn": "2026-04-27T13:00:00Z",
+        "authoredOn": "2026-04-29T10:17:40Z",
         "dosageInstruction": [
           {
-            "text": "40 mg subq q24h — postpartum VTE prophylaxis"
+            "text": "40 mg subq q24h \u2014 postpartum VTE prophylaxis"
           }
         ]
       },

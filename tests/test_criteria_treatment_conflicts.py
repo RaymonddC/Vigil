@@ -518,3 +518,140 @@ class TestAggregate:
         )
         assert report.evidence["kdigo_stage"] == 1
         assert report.evidence["hr"] == 42.0
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-bundle integration — verify that the data fixtures shipped in
+# data/patients/PT-XXX.json (loaded via synthetic_fallback) actually trip
+# the rules they were designed to demo.  Each test loads the bundle, runs
+# the rule engine end-to-end against it, and asserts the rule fires with
+# the expected severity / drug / physiology summary.  Regenerating
+# bundles via ``python data/seed_hapi.py --generate-only`` must keep all
+# of these green.
+#
+# Cross-references commit 834e520 which introduced the 5-rule engine —
+# these tests guarantee the demo coverage that commit promised.
+# ---------------------------------------------------------------------------
+
+
+class TestSyntheticBundleFixtures:
+    def _evaluate_bundle(self, patient_id: str):
+        """Run the rule engine against the bundled trajectory for ``patient_id``.
+
+        Imports synthetic_fallback lazily so the heavier dependency graph
+        only loads when these integration tests run.  Resets the module
+        cache to keep tests independent of run order.
+        """
+        from backend.mcp_server import synthetic_fallback as sf
+        from backend.mcp_server.tools.flag_treatment_conflicts import (
+            _resolve_kdigo_stage,
+        )
+
+        sf.reset_for_tests()
+        vitals = sf.get_synthetic_observations(
+            category="vital-signs", patient_id=patient_id,
+        )
+        labs = sf.get_synthetic_observations(
+            category="laboratory", patient_id=patient_id,
+        )
+        observations = vitals + labs
+        admins = sf.get_synthetic_medication_administrations(
+            patient_id=patient_id,
+        )
+        requests = sf.get_synthetic_medication_requests(
+            patient_id=patient_id,
+        )
+        kdigo_stage = _resolve_kdigo_stage(observations)
+        return evaluate_treatment_conflicts(
+            observations=observations,
+            medication_administrations=admins,
+            medication_requests=requests,
+            kdigo_stage=kdigo_stage,
+            now=datetime.now(UTC),
+        )
+
+    # PT-008 (sepsis trajectory) — should fire BOTH NSAID/AKI and
+    # ACE-I/hyperK rules. Demonstrates the multi-rule output shape.
+    def test_pt008_fires_nsaid_aki(self) -> None:
+        report = self._evaluate_bundle("PT-008")
+        rule_ids = [c.rule_id for c in report.conflicts]
+        assert "nsaid_aki" in rule_ids, (
+            f"NSAID/AKI rule must fire on PT-008; got {rule_ids}"
+        )
+        c = next(c for c in report.conflicts if c.rule_id == "nsaid_aki")
+        assert c.severity == "critical"
+        assert "ibuprofen" in c.drug_display.lower()
+        assert "KDIGO" in c.citation_anchor
+
+    def test_pt008_fires_ace_arb_hyperkalemia(self) -> None:
+        """K+ 5.7 + active lisinopril order → warning conflict."""
+        report = self._evaluate_bundle("PT-008")
+        rule_ids = [c.rule_id for c in report.conflicts]
+        assert "ace_arb_hyperk" in rule_ids, (
+            f"ACE-I/hyperK rule must fire on PT-008; got {rule_ids}"
+        )
+        c = next(c for c in report.conflicts if c.rule_id == "ace_arb_hyperk")
+        # 5.7 mmol/L is below the 6.0 critical cutoff → warning.
+        assert c.severity == "warning"
+        assert "lisinopril" in c.drug_display.lower()
+        assert "5.7" in c.physiology_summary
+        assert "KDIGO" in c.citation_anchor
+
+    def test_pt008_multi_rule_includes_safe_alternatives(self) -> None:
+        report = self._evaluate_bundle("PT-008")
+        # At least the two we just asserted plus dedup'd alternatives.
+        assert len(report.conflicts) >= 2
+        # Both NSAID and ACE-I rules contribute to safe_alternatives.
+        # CCB (calcium-channel blocker) comes from the ACE-I rule,
+        # acetaminophen from the NSAID rule.
+        alts = [a.lower() for a in report.safe_alternatives]
+        assert any("acetaminophen" in a for a in alts)
+        assert any("calcium" in a for a in alts)
+
+    # PT-007 (deteriorating trajectory) — should fire BOTH opioid and
+    # β-blocker rules. The β-blocker ride-along is the new fixture; the
+    # opioid rule was already wired by commit 834e520's predecessor.
+    def test_pt007_fires_opioid_resp_depression(self) -> None:
+        report = self._evaluate_bundle("PT-007")
+        rule_ids = [c.rule_id for c in report.conflicts]
+        assert "opioid_resp_depression" in rule_ids, (
+            f"Opioid rule must fire on PT-007; got {rule_ids}"
+        )
+        c = next(
+            c for c in report.conflicts
+            if c.rule_id == "opioid_resp_depression"
+        )
+        assert c.severity == "critical"
+        assert "morphine" in c.drug_display.lower()
+
+    def test_pt007_fires_beta_blocker_hypotension(self) -> None:
+        """SBP 88 < 90 + active metoprolol order → warning conflict.
+
+        Severity stays at warning because SBP is ≥85 and HR is normal —
+        if either drops further the rule should escalate to critical.
+        """
+        report = self._evaluate_bundle("PT-007")
+        rule_ids = [c.rule_id for c in report.conflicts]
+        assert "bblocker_brady_hypo" in rule_ids, (
+            f"β-blocker rule must fire on PT-007; got {rule_ids}"
+        )
+        c = next(
+            c for c in report.conflicts if c.rule_id == "bblocker_brady_hypo"
+        )
+        assert c.severity == "warning"
+        assert "metoprolol" in c.drug_display.lower()
+        assert "SBP 88" in c.physiology_summary
+        assert "ACC/AHA" in c.citation_anchor
+
+    # PT-010 (PPH trajectory) — anchors the anticoag/Hgb-drop rule.
+    def test_pt010_fires_anticoag_hgb_drop(self) -> None:
+        report = self._evaluate_bundle("PT-010")
+        rule_ids = [c.rule_id for c in report.conflicts]
+        assert "anticoag_hgb_drop" in rule_ids, (
+            f"Anticoag rule must fire on PT-010; got {rule_ids}"
+        )
+        c = next(
+            c for c in report.conflicts if c.rule_id == "anticoag_hgb_drop"
+        )
+        assert "enoxaparin" in c.drug_display.lower()
+        assert "ASH 2018" in c.citation_anchor or "Witt" in c.citation_anchor

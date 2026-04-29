@@ -143,11 +143,16 @@ def _select_patient(patient_id: str | None) -> str:
     """Map an inbound patient_id to the bundle key.
 
     PT-010 is the postpartum hemorrhage trajectory used by the PPH
-    skill. PT-008 ships a dedicated bundle to exercise the AKI + NSAID
-    treatment-conflict rule (KDIGO stage 1 with an active ibuprofen
-    order). Everyone else falls through to the PT-007 deteriorating-
-    postop trajectory — PT-007 is the canonical demo patient and the
-    synthetic disclosure narrative names it explicitly.
+    skill; it also exercises the anticoag/Hgb-drop treatment-conflict
+    rule via its active enoxaparin order plus the 12.4→9.8 g/dL Hgb
+    swing. PT-008 ships the multi-rule conflict bundle — KDIGO stage 2
+    AKI plus an active ibuprofen order trips ``nsaid_aki``, and a
+    K+ 5.7 mmol/L lab + active lisinopril order trips ``ace_arb_hyperk``.
+    PT-007 is the canonical demo trajectory and additionally surfaces
+    ``opioid_resp_depression`` (T+9h SpO2 90 + active morphine) and
+    ``bblocker_brady_hypo`` (latest SBP 88 + active metoprolol order).
+    Everyone else falls through to PT-007 because the synthetic
+    disclosure narrative names that bundle explicitly.
     """
     if patient_id == "PT-010":
         return "PT-010"
