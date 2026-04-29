@@ -2950,6 +2950,38 @@
         "method": "PUT",
         "url": "MedicationAdministration/MEDADMIN-PT-008-2"
       }
+    },
+    {
+      "fullUrl": "urn:uuid:MedicationRequest-MEDREQ-PT-008-1",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "MEDREQ-PT-008-1",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "5640",
+              "display": "Ibuprofen 600 mg po q6h prn"
+            }
+          ],
+          "text": "Ibuprofen 600 mg po q6h prn"
+        },
+        "subject": {
+          "reference": "Patient/PT-008"
+        },
+        "authoredOn": "2026-04-27T11:30:00Z",
+        "dosageInstruction": [
+          {
+            "text": "600 mg po q6h prn pain — surgical-team standing order"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/MEDREQ-PT-008-1"
+      }
     }
   ]
 }

@@ -177,3 +177,34 @@ class MedicationAdministration(BaseModel):
     subject: Reference | None = None
     effectiveDateTime: datetime | None = None
     dosage: Dosage | None = None
+
+
+class DosageInstruction(BaseModel):
+    """FHIR R4 Dosage backbone — used by MedicationRequest.dosageInstruction."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str | None = None
+    route: CodeableConcept | None = None
+
+
+class MedicationRequest(BaseModel):
+    """FHIR R4 MedicationRequest resource (active orders).
+
+    Used by ``flag_treatment_conflicts`` to detect drugs that have been
+    *ordered* but not necessarily administered yet — pre-emptive safety
+    check before the next dose lands. Mirrors the minimal-fields shape
+    of :class:`MedicationAdministration`.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    resourceType: str = "MedicationRequest"
+    id: str | None = None
+    status: str | None = None
+    intent: str | None = None
+    medicationCodeableConcept: CodeableConcept | None = None
+    medicationReference: Reference | None = None
+    subject: Reference | None = None
+    authoredOn: datetime | None = None
+    dosageInstruction: list[DosageInstruction] = Field(default_factory=list)

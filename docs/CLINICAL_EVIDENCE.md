@@ -302,6 +302,45 @@ LOINC codes verified against the HL7 build site (`https://build.fhir.org/observa
 
 ---
 
+## 11.3 Treatment Conflict Rules (B-tx-conflicts)
+
+The 5 rules encoded in `backend/criteria/treatment_conflicts.py` and surfaced via the `vigil.flag_treatment_conflicts` A2A skill. Each rule's docstring carries the citation anchor; this section is the canonical bibliography.
+
+### 11.3.1 NSAID + AKI
+**Rule**: KDIGO stage ≥1 + active or recently administered NSAID (ibuprofen, ketorolac, naproxen, celecoxib, diclofenac, indomethacin, meloxicam, high-dose aspirin) → **critical**.
+**Source 1**: KDIGO Acute Kidney Injury Work Group. *KDIGO Clinical Practice Guideline for Acute Kidney Injury*, §4.4.1 ("Avoid nephrotoxic agents whenever possible"). Kidney Int Suppl 2012;2(1):1–138.
+**URL**: https://kdigo.org/wp-content/uploads/2016/10/KDIGO-2012-AKI-Guideline-English.pdf
+**Source 2**: 2023 American Geriatrics Society Beers Criteria Update. *Updated AGS Beers Criteria for Potentially Inappropriate Medication Use in Older Adults*. J Am Geriatr Soc 2023.
+**URL**: https://agsjournals.onlinelibrary.wiley.com/doi/10.1111/jgs.18372
+**Strength**: Strong.
+
+### 11.3.2 β-blocker + bradycardia / hypotension
+**Rule**: HR <55 OR SBP <90 + active β-blocker (metoprolol, atenolol, propranolol, carvedilol, bisoprolol, esmolol, labetalol). **Critical** if HR <50 or SBP <85; else **warning**.
+**Source**: Whelton PK, Carey RM, Aronow WS, et al. *2017 ACC/AHA/AAPA/ABC/ACPM/AGS/APhA/ASH/ASPC/NMA/PCNA Guideline for the Prevention, Detection, Evaluation, and Management of High Blood Pressure in Adults*. Hypertension 2018;71:e13–e115.
+**URL**: https://www.ahajournals.org/doi/10.1161/HYP.0000000000000065
+**Strength**: Strong.
+
+### 11.3.3 ACE-I/ARB + hyperkalemia
+**Rule**: Latest K+ ≥5.5 mmol/L + active ACE-I/ARB (lisinopril, enalapril, ramipril, losartan, valsartan, irbesartan, candesartan, captopril). **Critical** if K+ ≥6.0; else **warning**.
+**Source 1**: Kidney Disease: Improving Global Outcomes (KDIGO) Blood Pressure Work Group. *KDIGO 2024 Clinical Practice Guideline for the Management of Blood Pressure in Chronic Kidney Disease*, §4.3 ("Monitor serum potassium when initiating or up-titrating RAS inhibitors").
+**URL**: https://kdigo.org/guidelines/blood-pressure-in-ckd/
+**Source 2**: 2023 AGS Beers Criteria (avoid ACE-I/ARB with NSAID + reduced kidney function — same anchor as §11.3.1).
+**Strength**: Strong.
+
+### 11.3.4 Opioid + respiratory depression
+**Rule**: SpO2 <92% OR RR <12 within 4h of most recent opioid administration (morphine, oxycodone, hydrocodone, fentanyl, hydromorphone, codeine, tramadol, buprenorphine) → **critical**.
+**Source**: Jungquist CR, Quinlan-Colwell A, Vallerand A, et al. *American Society for Pain Management Nursing Guidelines on Monitoring for Opioid-Induced Advancing Sedation and Respiratory Depression: Revisions*. Pain Manag Nurs 2020;21(1):7–25.
+**URL**: https://pubmed.ncbi.nlm.nih.gov/31785972/
+**Strength**: Strong.
+
+### 11.3.5 Anticoagulant + Hgb drop / active-bleeding suspicion
+**Rule**: Hgb dropped ≥2.0 g/dL from baseline (highest in past 7d) + active anticoagulant (heparin, enoxaparin, warfarin, apixaban, rivaroxaban, dabigatran, edoxaban, fondaparinux). **Critical** if drop ≥3.0 g/dL or current Hgb <8.0; else **warning**.
+**Source**: Witt DM, Nieuwlaat R, Clark NP, et al. *American Society of Hematology 2018 guidelines for management of venous thromboembolism: optimal management of anticoagulation therapy*. Blood Adv 2018;2(22):3257–3291.
+**URL**: https://ashpublications.org/bloodadvances/article/2/22/3257/15700
+**Strength**: Strong.
+
+---
+
 ## 12. Weak-claim warning list — fix before submission
 
 These are claims currently in draft copy that I could NOT fully source and recommend rephrasing:

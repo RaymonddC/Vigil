@@ -167,6 +167,10 @@ class PostopSentinelExecutor(AgentExecutor):
                 text, data_source = await self._handle_assess_pph(
                     sharp_headers, patient_id
                 )
+            elif skill is SkillId.FLAG_TREATMENT_CONFLICTS:
+                text, data_source = await self._handle_flag_treatment_conflicts(
+                    sharp_headers, patient_id
+                )
             elif skill is SkillId.START_WATCHING:
                 text = await self._handle_start_watching(
                     sharp_headers, patient_id
@@ -674,6 +678,83 @@ class PostopSentinelExecutor(AgentExecutor):
             lines.append("CMQCC recommended actions (verbatim):")
             lines.extend(f"- {a}" for a in actions[:5])
         lines.append(f"Rationale: {rationale}")
+        body = "\n".join(lines)
+        return _with_disclosure(body, data), _data_source(data)
+
+    async def _handle_flag_treatment_conflicts(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """Run flag_treatment_conflicts and format the conflict list.
+
+        Each conflict row carries severity, drug class, physiology
+        rationale, citation anchor, and verbatim mitigation. Only the
+        chat prose is layered here — the verdict itself is deterministic
+        (rule-engine in ``backend/criteria/treatment_conflicts.py``).
+        """
+        try:
+            raw = await self._mcp.call_tool(
+                "flag_treatment_conflicts",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't scan treatment conflicts for `{patient_id}` "
+                f"because the MCP tool was unreachable: {e}.",
+                "fhir",
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(
+            data, patient_id, action="scan treatment conflicts",
+        )
+        if err is not None:
+            return err, _data_source(data)
+
+        conflicts = data.get("conflicts") or []
+        safe_alts = data.get("safe_alternatives") or []
+
+        if not conflicts:
+            body = (
+                f"Treatment safety scan for `{patient_id}`: "
+                "**no conflicts detected** across the 5 rules "
+                "(NSAID/AKI, β-blocker/bradycardia, "
+                "ACE-I/hyperkalemia, opioid/respiratory depression, "
+                "anticoagulant/bleeding). Order request can proceed "
+                "with standard monitoring."
+            )
+            return _with_disclosure(body, data), _data_source(data)
+
+        crit = sum(
+            1 for c in conflicts if c.get("severity") == "critical"
+        )
+        warn = sum(
+            1 for c in conflicts if c.get("severity") == "warning"
+        )
+        header = (
+            f"Treatment safety scan for `{patient_id}`: "
+            f"`{len(conflicts)}` conflict(s) — `{crit}` critical, "
+            f"`{warn}` warning."
+        )
+        lines: list[str] = [header]
+        for c in conflicts[:5]:
+            sev = c.get("severity", "?")
+            drug_class = c.get("drug_class", "?")
+            drug_disp = c.get("drug_display", "?")
+            physio = c.get("physiology_summary", "?")
+            cite = c.get("citation_anchor", "?")
+            mitig = c.get("mitigation", "?")
+            lines.append(
+                f"- **[{sev}] {drug_class}** (`{drug_disp}`) vs "
+                f"{physio}. Cite: {cite}. Mitigation: {mitig}"
+            )
+        if safe_alts:
+            lines.append(
+                "Safe alternatives: "
+                + ", ".join(f"`{a}`" for a in safe_alts[:6])
+            )
         body = "\n".join(lines)
         return _with_disclosure(body, data), _data_source(data)
 

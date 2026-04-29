@@ -31,6 +31,7 @@ class SkillId(StrEnum):
     ASSESS_AKI = "vigil.assess_postop_aki"
     SCORE_NEWS2 = "vigil.score_news2"
     ASSESS_PPH = "vigil.assess_pph_severity"
+    FLAG_TREATMENT_CONFLICTS = "vigil.flag_treatment_conflicts"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -40,6 +41,19 @@ class SkillId(StrEnum):
 # generic ``score``/``risk`` keywords would steal NEWS2 and PPH prompts.
 _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
+    # Treatment-conflict skill — must come BEFORE the generic
+    # ``risk``/``score`` family, because prompts like "is it safe to
+    # give X" or "any drug interaction risk" otherwise leak to
+    # SCORE_RISK. Phrases are intentionally specific to the
+    # order-writing/safety question — not just any "med" mention.
+    (
+        ("safe to give", "can i order", "can i give", "ok to order",
+         "drug interaction", "med safety", "medication safety",
+         "treatment conflict", "treatment conflicts",
+         "drug conflict", "drug-vs", "contraindication",
+         "contraindicated"),
+        SkillId.FLAG_TREATMENT_CONFLICTS,
+    ),
     (
         ("pph", "postpartum hemorrhage", "postpartum hemmorhage",
          "blood loss", "hemorrhage", "haemorrhage", "cmqcc"),

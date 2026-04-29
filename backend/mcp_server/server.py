@@ -26,6 +26,7 @@ from backend.mcp_server.middleware import SharpHeaderMiddleware
 from backend.mcp_server.tools import assess_postop_aki as _b_aki
 from backend.mcp_server.tools import assess_pph_severity as _b_pph
 from backend.mcp_server.tools import flag_sepsis_onset as _b4
+from backend.mcp_server.tools import flag_treatment_conflicts as _b_tx
 from backend.mcp_server.tools import generate_escalation_note as _b5
 from backend.mcp_server.tools import score_deterioration_risk as _b3
 from backend.mcp_server.tools import score_news2 as _b_news2
@@ -378,6 +379,52 @@ async def assess_pph_severity(
         uterotonics_given=uterotonics_given,
         clinical_instability=clinical_instability,
     )
+
+
+@mcp.tool(
+    name="flag_treatment_conflicts",
+    description=(
+        "Physiology-aware drug safety scanner. Flags drug-vs-vitals/"
+        "labs/conditions conflicts across 5 deterministic rules: "
+        "(1) NSAID + AKI [KDIGO 2012, Beers 2023]; "
+        "(2) β-blocker + bradycardia/hypotension [ACC/AHA 2017]; "
+        "(3) ACE-I/ARB + hyperkalemia [KDIGO 2024 BP-in-CKD]; "
+        "(4) opioid + respiratory depression [ASPMN 2020]; "
+        "(5) anticoagulant + Hgb drop / bleeding [ASH 2018]. "
+        "Cites guideline per rule; deterministic — no LLM."
+    ),
+)
+async def flag_treatment_conflicts(
+    patient_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="FHIR Patient.id. Optional if SHARP header set.",
+        ),
+    ] = None,
+    lookback_hours: Annotated[
+        int,
+        Field(
+            default=24,
+            ge=1,
+            le=72,
+            description=(
+                "How far back to scan vitals + medication "
+                "administrations, in hours. Labs use a 7-day window "
+                "regardless (needed for the Hgb-drop rule)."
+            ),
+        ),
+    ] = 24,
+    ctx: Context | None = None,
+) -> str:
+    """Scan for drug-vs-physiology conflicts via the deterministic engine."""
+    sharp = get_sharp_context(ctx)
+    pid = resolve_patient_id(patient_id, sharp)
+    logger.info(
+        "tool called",
+        extra={"tool": "flag_treatment_conflicts", "patient_id": pid},
+    )
+    return await _b_tx.run(pid, sharp, lookback_hours=lookback_hours)
 
 
 # ---------------------------------------------------------------------------

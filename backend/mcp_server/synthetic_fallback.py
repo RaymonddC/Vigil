@@ -44,6 +44,7 @@ from backend.fhir.models import (
     Condition,
     Encounter,
     MedicationAdministration,
+    MedicationRequest,
     Observation,
     Patient,
 )
@@ -66,6 +67,7 @@ _RECENT_OFFSET = timedelta(minutes=5)
 # backend/ in the image).
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "patients"
 _PT007_PATH = _DATA_DIR / "PT-007.json"
+_PT008_PATH = _DATA_DIR / "PT-008.json"
 _PT010_PATH = _DATA_DIR / "PT-010.json"
 
 # Default bundle = PT-007 (deteriorating-postop trajectory). The PPH
@@ -140,14 +142,17 @@ def reset_for_tests() -> None:
 def _select_patient(patient_id: str | None) -> str:
     """Map an inbound patient_id to the bundle key.
 
-    PT-010 is the only patient with a dedicated bundle (postpartum
-    hemorrhage trajectory used by the PPH skill). Everyone else falls
-    through to the PT-007 deteriorating-postop trajectory — that's
-    intentional: PT-007 is the canonical demo patient and the synthetic
-    disclosure narrative names it explicitly.
+    PT-010 is the postpartum hemorrhage trajectory used by the PPH
+    skill. PT-008 ships a dedicated bundle to exercise the AKI + NSAID
+    treatment-conflict rule (KDIGO stage 1 with an active ibuprofen
+    order). Everyone else falls through to the PT-007 deteriorating-
+    postop trajectory — PT-007 is the canonical demo patient and the
+    synthetic disclosure narrative names it explicitly.
     """
     if patient_id == "PT-010":
         return "PT-010"
+    if patient_id == "PT-008":
+        return "PT-008"
     return _DEFAULT_PATIENT_ID
 
 
@@ -240,6 +245,29 @@ def get_synthetic_medication_administrations(
     return [MedicationAdministration.model_validate(r) for r in raws]
 
 
+def get_synthetic_medication_requests(
+    patient_id: str | None = None,
+) -> list[MedicationRequest]:
+    """Return the bundle's MedicationRequest resources (timestamps rebased).
+
+    MedicationRequest carries ``authoredOn`` (not ``effectiveDateTime``),
+    so the rebase pass shifts that field instead. The same offset used
+    for observations applies — the trajectory shape is preserved end-to-
+    end. Used by ``vigil.flag_treatment_conflicts`` so the demo path
+    surfaces drug-vs-physiology conflicts even when FHIR is unreachable.
+    """
+    pid = _select_patient(patient_id)
+    offset = _rebase_offset(pid)
+    raws: list[dict[str, Any]] = []
+    for r in _resources_of_type("MedicationRequest", pid):
+        out = dict(r)
+        authored = r.get("authoredOn")
+        if authored:
+            out["authoredOn"] = (_parse_iso(authored) + offset).isoformat()
+        raws.append(out)
+    return [MedicationRequest.model_validate(r) for r in raws]
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -249,6 +277,8 @@ def _bundle_path(patient_id: str) -> Path:
     """Resolve the JSON path for a known synthetic bundle id."""
     if patient_id == "PT-010":
         return _PT010_PATH
+    if patient_id == "PT-008":
+        return _PT008_PATH
     return _PT007_PATH
 
 

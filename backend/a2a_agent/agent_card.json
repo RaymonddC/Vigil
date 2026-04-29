@@ -85,6 +85,12 @@
       "name": "Assess postpartum hemorrhage severity (CMQCC)",
       "description": "Stages postpartum hemorrhage 0–3 per CMQCC OB Hemorrhage Toolkit v3.0 with ACOG Practice Bulletin 183 (2017) cumulative-EBL definition. Inputs: cumulative EBL (LOINC 55758-7), HR, SBP, fibrinogen, hemoglobin trend. Returns stage, shock index (HR/SBP), triggers list, and the verbatim CMQCC uterotonic-and-action ladder. When EBL is unmeasured, degrades to shock-index-only with explicit ACOG CO 794 caveat.",
       "tags": ["pph", "postpartum", "hemorrhage", "cmqcc", "obstetric"]
+    },
+    {
+      "id": "vigil.flag_treatment_conflicts",
+      "name": "Flag drug-vs-physiology treatment conflicts",
+      "description": "Physiology-aware safety scanner: flags drug-vs-vitals/labs/conditions conflicts (NSAID/AKI, β-blocker/bradycardia, ACE-I/hyperkalemia, opioid/respiratory depression, anticoagulant/bleeding). Cites guideline per rule; deterministic verdict, LLM only for prose.",
+      "tags": ["safety", "drug-conflict", "treatment-conflict", "med-safety", "interaction"]
     }
   ],
   "securitySchemes": {

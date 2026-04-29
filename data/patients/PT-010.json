@@ -3460,6 +3460,38 @@
         "method": "PUT",
         "url": "MedicationAdministration/MEDADMIN-PT-010-1"
       }
+    },
+    {
+      "fullUrl": "urn:uuid:MedicationRequest-MEDREQ-PT-010-1",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "MEDREQ-PT-010-1",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "67108",
+              "display": "Enoxaparin 40 mg subq q24h (VTE prophylaxis)"
+            }
+          ],
+          "text": "Enoxaparin 40 mg subq q24h"
+        },
+        "subject": {
+          "reference": "Patient/PT-010"
+        },
+        "authoredOn": "2026-04-27T13:00:00Z",
+        "dosageInstruction": [
+          {
+            "text": "40 mg subq q24h — postpartum VTE prophylaxis"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/MEDREQ-PT-010-1"
+      }
     }
   ]
 }

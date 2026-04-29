@@ -808,6 +808,100 @@ class AssessPphOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 1.8  flag_treatment_conflicts  — physiology-aware drug safety scanner
+# ---------------------------------------------------------------------------
+
+
+class TreatmentConflict(BaseModel):
+    """Single drug-vs-physiology conflict row.
+
+    Each row carries the rule_id (so the chat layer can format
+    consistently across rules), the severity, the offending drug, a
+    short physiology summary explaining *why* the rule fired, the
+    citation anchor (linked to ``docs/CLINICAL_EVIDENCE.md`` "Treatment
+    Conflict Rules"), the verbatim mitigation string, and a short list
+    of safe alternatives.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: Literal[
+        "nsaid_aki",
+        "bblocker_brady_hypo",
+        "ace_arb_hyperk",
+        "opioid_resp_depression",
+        "anticoag_hgb_drop",
+    ]
+    severity: Literal["warning", "critical"]
+    drug_class: str
+    drug_display: str
+    physiology_summary: str
+    citation_anchor: str
+    mitigation: str
+    safe_alternatives: list[str]
+
+
+class TreatmentConflictsOutput(BaseModel):
+    """Output for ``flag_treatment_conflicts``.
+
+    Returns a list of ``TreatmentConflict`` rows (possibly empty), a
+    de-duplicated ``safe_alternatives`` summary across rules, and an
+    evidence block surfacing the inputs the engine used.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "triggered",
+                    "patient_id": "PT-008",
+                    "conflicts": [
+                        {
+                            "rule_id": "nsaid_aki",
+                            "severity": "critical",
+                            "drug_class": "NSAID",
+                            "drug_display": "ibuprofen 600 mg po",
+                            "physiology_summary": (
+                                "KDIGO stage 1 AKI present"
+                            ),
+                            "citation_anchor": (
+                                "KDIGO 2012 §4.4.1; AGS Beers "
+                                "Criteria 2023"
+                            ),
+                            "mitigation": (
+                                "Consider acetaminophen, gabapentin, "
+                                "or regional/local analgesia."
+                            ),
+                            "safe_alternatives": [
+                                "acetaminophen",
+                                "gabapentin",
+                            ],
+                        }
+                    ],
+                    "safe_alternatives": [
+                        "acetaminophen", "gabapentin",
+                    ],
+                    "evidence": {
+                        "kdigo_stage": 1,
+                        "k": None,
+                        "hr": 78,
+                    },
+                    "data_source": "fhir",
+                }
+            ]
+        },
+    )
+
+    status: ToolStatus
+    patient_id: str
+    conflicts: list[TreatmentConflict]
+    safe_alternatives: list[str]
+    evidence: dict[str, Any]
+    data_source: Literal["fhir", "synthetic_demo"] = "fhir"
+
+
+# ---------------------------------------------------------------------------
 # 6.4  Approve endpoint
 # ---------------------------------------------------------------------------
 
