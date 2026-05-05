@@ -58,7 +58,13 @@ _card_data = json.loads(_card_path.read_text())
 # `supportedInterfaces[].url`. Both must point at the public URL or Prompt
 # Opinion will read the latter and call back at localhost.
 if os.environ.get("A2A_PUBLIC_URL"):
-    _public_url = os.environ["A2A_PUBLIC_URL"]
+    _public_url = os.environ["A2A_PUBLIC_URL"].rstrip("/")
+    # The JSON-RPC handler is mounted at POST /a2a (see app_builder.build below).
+    # Tolerate operators setting A2A_PUBLIC_URL to either the host root or the
+    # full RPC URL — Prompt Opinion will POST to whatever the AgentCard advertises,
+    # so the path suffix must match the mount or every call 405s.
+    if not _public_url.endswith("/a2a"):
+        _public_url = f"{_public_url}/a2a"
     _card_data["url"] = _public_url
     for _iface in _card_data.get("supportedInterfaces", []):
         _iface["url"] = _public_url
