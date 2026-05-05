@@ -107,6 +107,8 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
       VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
       FHIR_BASE_URL: http://hapi:8080/fhir
       # SEC-01 SSRF allowlist — workspace HAPI (dev/portfolio) plus the
@@ -146,6 +148,8 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
       VIGIL_API_KEY: ${VIGIL_API_KEY:?VIGIL_API_KEY must be set in .env}
       MCP_BASE_URL: http://mcp:7001
       FHIR_BASE_URL: http://hapi:8080/fhir
