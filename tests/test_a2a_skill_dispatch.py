@@ -417,8 +417,11 @@ class TestSkillDispatch:
         assert task.status.state is TaskState.completed
         text = _final_text(event_queue)
         assert "SBAR" in text
-        assert "critical" in text
-        assert "rapid_response" in text
+        # New layout renders the severity as a clinician-facing badge
+        # ("EMERGENCY — page now") and the recipient as plain English
+        # ("Rapid Response Team — page immediately"), not the raw enum.
+        assert "EMERGENCY" in text
+        assert "Rapid Response Team" in text
 
     @pytest.mark.asyncio
     async def test_start_watching_returns_acknowledgement(self) -> None:

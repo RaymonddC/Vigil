@@ -318,18 +318,21 @@ class PostopSentinelExecutor(AgentExecutor):
 
         # Recommended action — derived from severity per NEWS2 RCP-2017
         # response framework, adapted to MEWT's binary red/yellow scheme.
+        # Cite the guideline inline so a clinician scanning the chat reply
+        # sees the source of the recommendation without scrolling.
         if red_breaches:
             action = (
-                "**Action**: URGENT — recheck within 15 min, page covering "
-                "MD or rapid-response team. Move to hourly observations "
-                "minimum. Consider qSOFA / NEWS2 follow-up; if any further "
-                "deterioration, escalate to ICU."
+                "**Action** *(per NEWS2 RCP-2017 / Subbe MEWS)*: URGENT — "
+                "recheck within 15 min, page covering MD or rapid-response "
+                "team. Move to hourly observations minimum. Consider qSOFA "
+                "/ NEWS2 follow-up; if any further deterioration, escalate "
+                "to ICU."
             )
         else:
             action = (
-                "**Action**: Increase to hourly observations. RN reassess "
-                "in 30 min; escalate to MD if any breach persists or a new "
-                "red breach develops."
+                "**Action** *(per NEWS2 RCP-2017)*: Increase to hourly "
+                "observations. RN reassess in 30 min; escalate to MD if "
+                "any breach persists or a new red breach develops."
             )
 
         sections = [
@@ -432,26 +435,60 @@ class PostopSentinelExecutor(AgentExecutor):
         onset = data.get("onset_estimate")
 
         if not suspected:
-            tail = (
-                f" Mode `{mode}`, no criteria met."
-                if not criteria
-                else f" Mode `{mode}`; partial criteria: "
-                + "; ".join(f"`{c}`" for c in criteria[:3])
+            sections = [
+                f"### Sepsis screen — NOT SUSPECTED *(per CDC ASE, mode `{mode}`)*",
+            ]
+            if criteria:
+                sections.append(
+                    f"Partial criteria seen ({len(criteria)}): "
+                    + "; ".join(criteria[:3])
+                    + ". Below the surveillance threshold."
+                )
+            else:
+                sections.append(
+                    "No CDC ASE criteria met on the most recent observations."
+                )
+            sections.append(
+                "**Action**: Continue routine observation. Re-screen "
+                "automatically on next tick."
             )
-            body = (
-                f"Sepsis screen for `{patient_id}`: not suspected."
-                + tail
-            )
+            body = "\n".join(sections)
             return _with_disclosure(body, data), _data_source(data)
 
-        header = (
-            f"Sepsis screen for `{patient_id}`: SUSPECTED "
-            f"(mode `{mode}`"
-            + (f", onset `{onset}`" if onset else "")
-            + ")."
+        # Sepsis-3 1-hour bundle (Surviving Sepsis Campaign 2021) — the
+        # single most under-applied checklist in postop wards. Vigil
+        # doesn't write orders; this skill surfaces the bundle as a
+        # prompt for the receiving clinician to verify item-by-item.
+        bundle_items = [
+            "Measure lactate; remeasure if initial ≥ 2 mmol/L",
+            "Obtain blood cultures BEFORE antibiotics",
+            "Administer broad-spectrum antibiotics within 1h",
+            "Begin 30 mL/kg crystalloid for hypotension or lactate ≥ 4",
+            "Apply vasopressors if MAP < 65 mmHg after fluids",
+        ]
+
+        sections = [
+            f"### Sepsis screen — SUSPECTED *(per CDC ASE, mode `{mode}`)*",
+        ]
+        if onset:
+            sections.append(f"Estimated onset: **{onset}** UTC.")
+
+        if criteria:
+            sections.append("\n**Criteria met:**")
+            sections.extend(f"- {c}" for c in criteria[:6])
+
+        sections.append(
+            "\n**Sepsis-3 1-hour bundle** *(Surviving Sepsis Campaign 2021 — "
+            "verify each before paging back):*"
         )
-        bullets = [f"- {c}" for c in criteria[:5]]
-        body = "\n".join([header, "Criteria met:", *bullets])
+        sections.extend(f"- [ ] {item}" for item in bundle_items)
+
+        sections.append(
+            "\n**Action**: Treat as time-critical. Mortality rises ~7%/hour "
+            "of bundle delay (Kumar 2006). Page covering MD now; if no "
+            "response in 5 min, activate rapid-response team."
+        )
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_draft_sbar(
@@ -551,7 +588,7 @@ class PostopSentinelExecutor(AgentExecutor):
         )
 
         narrative = (data.get("narrative") or "").strip()
-        severity = data.get("severity") or "info"
+        severity = (data.get("severity") or "info").lower()
         resolved_recipient = data.get("recipient_role") or recipient_role
         model_used = data.get("model_used") or "unknown"
 
@@ -565,18 +602,44 @@ class PostopSentinelExecutor(AgentExecutor):
             },
         )
 
-        header = (
-            f"SBAR for `{patient_id}` — severity `{severity}`, "
-            f"recipient `{resolved_recipient}` (model `{model_used}`)."
-        )
+        # Severity badge — first thing on screen so the reader's eye
+        # locks onto urgency before any prose. Maps tool severities to
+        # the AHRQ-style ROUTINE / URGENT / EMERGENCY trichotomy
+        # clinicians actually use on a paging system.
+        badge_map = {
+            "critical": "EMERGENCY — page now",
+            "emergency": "EMERGENCY — page now",
+            "urgent": "URGENT — assessment within 30 min",
+            "routine": "ROUTINE — ward review",
+            "info": "ROUTINE — ward review",
+        }
+        badge = badge_map.get(severity, f"{severity.upper()} — escalate")
+
+        # Recipient line in plain English with paging guidance — turns
+        # the role enum into something a clinician actually does.
+        recipient_text = {
+            "rapid_response": (
+                "Rapid Response Team — page immediately. "
+                "Bedside team should remain with patient."
+            ),
+            "covering_md": (
+                "Covering MD — urgent assessment within 30 min. "
+                "Hand off via secure pager."
+            ),
+            "charge_nurse": (
+                "Charge nurse — review at next round, no later than 1h."
+            ),
+        }.get(resolved_recipient, resolved_recipient)
+
+        # Build the SBAR body. Wrap in a fenced code block so PO renders
+        # it monospaced and the clinician can copy-paste straight into
+        # the EHR with no manual reformatting.
         if narrative:
-            body = f"{header}\n\n{narrative}"
+            sbar_body = narrative
         else:
-            # Fall back to assembling from the structured SBAR block if the
-            # narrative is empty.
             sbar = data.get("sbar") or {}
-            block = "\n".join(
-                f"**{k.title()}:** {sbar.get(k, '').strip() or '—'}"
+            sbar_body = "\n".join(
+                f"{k[0].upper()}: {sbar.get(k, '').strip() or '—'}"
                 for k in (
                     "situation",
                     "background",
@@ -584,8 +647,18 @@ class PostopSentinelExecutor(AgentExecutor):
                     "recommendation",
                 )
             )
-            body = f"{header}\n\n{block}"
 
+        sections = [
+            f"### SBAR — **{badge}**",
+            f"**To:** {recipient_text}",
+            "**From:** Vigil postop & postpartum sentinel",
+            f"**Patient:** `{patient_id}`",
+            "",
+            "```",
+            sbar_body,
+            "```",
+        ]
+        body = "\n".join(sections)
         if data_source == SYNTHETIC_DATA_SOURCE:
             body = f"{synthetic_disclosure(patient_id)}\n\n{body}"
         return body, data_source
@@ -733,31 +806,53 @@ class PostopSentinelExecutor(AgentExecutor):
         ebl_caveat = data.get("ebl_caveat")
         rationale = data.get("rationale") or "no rationale provided"
 
-        ebl_str = f"`{ebl:.0f} mL`" if isinstance(ebl, (int, float)) else "`unmeasured`"
-        si_str = f"`{si:.2f}`" if isinstance(si, (int, float)) else "`?`"
+        ebl_str = f"{ebl:.0f} mL" if isinstance(ebl, (int, float)) else "unmeasured"
+        si_str = f"{si:.2f}" if isinstance(si, (int, float)) else "?"
         hgb_str = (
-            f"`{hgb:.1f} g/dL`" if isinstance(hgb, (int, float)) else "`?`"
+            f"{hgb:.1f} g/dL" if isinstance(hgb, (int, float)) else "?"
         )
         fib_str = (
-            f"`{fib:.0f} mg/dL`" if isinstance(fib, (int, float)) else "`?`"
+            f"{fib:.0f} mg/dL" if isinstance(fib, (int, float)) else "?"
         )
 
-        header = (
-            f"PPH assessment for `{patient_id}`: CMQCC **Stage {stage}**. "
-            f"EBL {ebl_str}, shock index {si_str}, Hgb {hgb_str}, "
-            f"fibrinogen {fib_str}."
-        )
-        lines = [header]
+        # Stage badge — CMQCC v3.0 / ACOG PB 183. Render the urgency in
+        # plain English so a clinician scanning the chat reply
+        # immediately knows whether to call OB, activate massive
+        # transfusion, or continue routine surveillance.
+        stage_badge = {
+            0: "STAGE 0 — routine postpartum surveillance",
+            1: "STAGE 1 — increased surveillance, OB at bedside",
+            2: "STAGE 2 — URGENT, second IV + uterotonics + blood bank notify",
+            3: "STAGE 3 — MASSIVE TRANSFUSION PROTOCOL, OR/ICU",
+        }.get(stage, f"STAGE {stage} — escalate")
+
+        sections = [
+            f"### PPH severity — **{stage_badge}** *(CMQCC v3.0 / ACOG PB 183)*",
+            f"**EBL** {ebl_str} · **Shock Index** {si_str} (HR/SBP) "
+            f"· **Hgb** {hgb_str} · **Fibrinogen** {fib_str}",
+        ]
         if ebl_caveat:
-            lines.append(f"Caveat: {ebl_caveat}")
+            sections.append(f"*EBL caveat:* {ebl_caveat}")
+
         if triggers:
-            lines.append("Triggers:")
-            lines.extend(f"- {t}" for t in triggers[:5])
+            sections.append("\n**Triggers:**")
+            sections.extend(f"- {t}" for t in triggers[:5])
+
         if actions:
-            lines.append("CMQCC recommended actions (verbatim):")
-            lines.extend(f"- {a}" for a in actions[:5])
-        lines.append(f"Rationale: {rationale}")
-        body = "\n".join(lines)
+            sections.append("\n**CMQCC action ladder** *(verbatim, in order):*")
+            sections.extend(f"{i}. {a}" for i, a in enumerate(actions[:8], 1))
+
+        # Stage 3 = massive hemorrhage. Surface the MTP ratio prompt
+        # explicitly — it's the single most-forgotten step under stress.
+        if stage >= 3:
+            sections.append(
+                "\n**Massive Transfusion Protocol**: activate now. Target "
+                "ratio **1:1:1 RBC:FFP:platelets** (PROPPR trial, JAMA 2015). "
+                "Notify blood bank; consider TXA 1g IV if within 3h of bleed onset."
+            )
+
+        sections.append(f"\n*Rationale:* {rationale}")
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_flag_treatment_conflicts(
@@ -956,15 +1051,44 @@ class PostopSentinelExecutor(AgentExecutor):
         urg = [a for a in alerts_sorted if a.get("severity") == "urgent"]
         rou = [a for a in alerts_sorted if a.get("severity") not in ("critical", "urgent")]
 
+        # Compute age + stale flag once, up here, so every alert line
+        # uses the same "now" reference even if list_pending_alerts
+        # returned slowly.
+        from datetime import UTC, datetime
+        now = datetime.now(UTC)
+
+        def _age_str(created_iso: str) -> tuple[str, bool]:
+            """Return ('14m ago', is_stale_flag) for a created_at ISO string.
+
+            >30 min without a clinician claim is considered stale per
+            ward-charge-nurse convention; the flag drives a visual
+            warning in the line so older alerts surface first to the eye.
+            """
+            try:
+                created_dt = datetime.fromisoformat(
+                    created_iso.replace("Z", "+00:00")
+                )
+            except (ValueError, AttributeError):
+                return ("just now", False)
+            secs = int((now - created_dt).total_seconds())
+            stale = secs >= 30 * 60
+            if secs < 60:
+                return (f"{secs}s ago", stale)
+            if secs < 60 * 60:
+                return (f"{secs // 60}m ago", stale)
+            hours = secs / 3600
+            return (f"{hours:.1f}h ago", stale)
+
         def _line(a: dict) -> str:
             pid = a.get("patient_id", "?")
             sev = a.get("severity", "?")
-            created = (a.get("created_at", "") or "")[:19].replace("T", " ")
+            age, stale = _age_str(a.get("created_at", "") or "")
+            stale_tag = " — **STALE, claim now**" if stale else ""
             note = (a.get("narrative", "") or "")
             if len(note) > 140:
                 note = note[:137].rstrip() + "…"
             return (
-                f"- **{pid}** *(severity: {sev}, raised {created} UTC)*\n"
+                f"- **{pid}** · {sev} · raised {age}{stale_tag}\n"
                 f"  {note}"
             )
 
