@@ -252,37 +252,104 @@ class PostopSentinelExecutor(AgentExecutor):
         scanned = data.get("scanned_count", 0)
         status = data.get("status", "ok")
 
+        # Render thresholds with natural-language operators ("below 90"
+        # rather than "<90") — PO's markdown renderer can otherwise eat
+        # the angle brackets as HTML, and the natural form reads aloud
+        # cleanly when a clinician scans the chat reply at the bedside.
+        def _humanize(threshold: str) -> str:
+            t = (threshold or "").strip()
+            if t.startswith("<="):
+                return f"≤ {t[2:].strip()}"
+            if t.startswith(">="):
+                return f"≥ {t[2:].strip()}"
+            if t.startswith("<"):
+                return f"below {t[1:].strip()}"
+            if t.startswith(">"):
+                return f"above {t[1:].strip()}"
+            return t
+
+        # Freshness — clinicians treat a vital-sign reading older than
+        # ~30 min on a watched postop patient as stale. Surface the gap
+        # explicitly so a stale screen is never silently relied on.
+        from datetime import UTC, datetime
+        latest_iso = max(
+            (b.get("observed_at", "") for b in breaches),
+            default=data.get("window_end", ""),
+        )
+        freshness = ""
+        try:
+            if latest_iso:
+                latest_dt = datetime.fromisoformat(
+                    str(latest_iso).replace("Z", "+00:00")
+                )
+                age_min = int((datetime.now(UTC) - latest_dt).total_seconds() // 60)
+                if age_min < 60:
+                    freshness = f"Last reading {age_min} min ago."
+                else:
+                    freshness = (
+                        f"Last reading {age_min // 60}h "
+                        f"{age_min % 60}m ago — **data may be stale**."
+                    )
+        except (ValueError, TypeError):
+            pass
+
         if not breaches:
             body = (
-                f"**Vital screen** — patient `{patient_id}`\n\n"
-                f"No MEWT breaches across {scanned} recent observations. "
-                "All vitals within thresholds."
-            )
+                f"### Vital screen — CLEAR\n"
+                f"All {scanned} recent observations within MEWT thresholds. "
+                f"{freshness}\n\n"
+                "**Action**: Continue routine observation schedule."
+            ).strip()
             return _with_disclosure(body, data), _data_source(data)
 
-        red = sum(1 for b in breaches if b.get("severity") == "red")
-        yellow = sum(1 for b in breaches if b.get("severity") == "yellow")
+        red_breaches = [b for b in breaches if b.get("severity") == "red"]
+        yellow_breaches = [b for b in breaches if b.get("severity") == "yellow"]
 
-        rows = [
-            "| Vital | Value | Threshold | Severity |",
-            "|---|---|---|---|",
-        ]
-        for b in breaches[:8]:
-            sev = b.get("severity", "?")
-            rows.append(
-                f"| {b.get('label', '?')} "
-                f"| {b.get('value', '?')} {b.get('unit', '')} "
-                f"| {b.get('threshold', '?')} "
-                f"| **{sev}** |"
+        def _line(b: dict) -> str:
+            label = b.get("label", "?")
+            value = b.get("value", "?")
+            unit = (b.get("unit", "") or "").strip()
+            thr = _humanize(b.get("threshold", ""))
+            tail = f" {unit}" if unit else ""
+            return f"- **{label}** {value}{tail} (threshold {thr})"
+
+        # Recommended action — derived from severity per NEWS2 RCP-2017
+        # response framework, adapted to MEWT's binary red/yellow scheme.
+        if red_breaches:
+            action = (
+                "**Action**: URGENT — recheck within 15 min, page covering "
+                "MD or rapid-response team. Move to hourly observations "
+                "minimum. Consider qSOFA / NEWS2 follow-up; if any further "
+                "deterioration, escalate to ICU."
+            )
+        else:
+            action = (
+                "**Action**: Increase to hourly observations. RN reassess "
+                "in 30 min; escalate to MD if any breach persists or a new "
+                "red breach develops."
             )
 
-        body = (
-            f"**Vital screen** — patient `{patient_id}` "
-            f"(status: **{status}**)\n\n"
-            f"{len(breaches)} MEWT breach(es) — "
-            f"**{red} red**, **{yellow} yellow** — across {scanned} observations.\n\n"
-            + "\n".join(rows)
+        sections = [
+            f"### Vital screen — TRIGGERED ({len(breaches)} breach"
+            f"{'es' if len(breaches) != 1 else ''})"
+        ]
+        if freshness:
+            sections.append(freshness)
+        sections.append(
+            f"Scanned **{scanned}** observation"
+            f"{'s' if scanned != 1 else ''} — "
+            f"**{len(red_breaches)} red**, **{len(yellow_breaches)} yellow**."
         )
+        if red_breaches:
+            sections.append("\n**Critical (RED) — escalate now:**")
+            sections.extend(_line(b) for b in red_breaches[:6])
+        if yellow_breaches:
+            sections.append("\n**Concerning (YELLOW):**")
+            sections.extend(_line(b) for b in yellow_breaches[:6])
+        sections.append("")
+        sections.append(action)
+
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_score_risk(

@@ -222,8 +222,12 @@ class TestSkillDispatch:
         assert task.status.state is TaskState.completed
         text = _final_text(event_queue)
         assert "Vital screen" in text
-        assert PATIENT_ID in text
-        assert "MEWT breaches" in text.lower() or "no mewt breaches" in text.lower()
+        # Reply is patient-context-aware: PO already shows the selected
+        # patient in the chat header, so the body focuses on the clinical
+        # finding rather than echoing the ID. Either CLEAR or TRIGGERED
+        # plus a recommended action must appear.
+        assert "CLEAR" in text or "TRIGGERED" in text
+        assert "Action" in text
 
     @pytest.mark.asyncio
     async def test_score_risk_calls_risk_tool(self) -> None:
