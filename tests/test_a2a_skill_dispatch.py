@@ -265,8 +265,10 @@ class TestSkillDispatch:
             mcp.call_tool.await_args.args[0] == "score_deterioration_risk"
         )
         text = _final_text(event_queue)
-        assert "high" in text
-        assert "qSOFA `2 / 3`" in text
+        # New layout uses an uppercase band badge ("HIGH — escalate now")
+        # and prints qSOFA without backticks for chat readability.
+        assert "HIGH" in text
+        assert "qSOFA **2 / 3**" in text
 
     @pytest.mark.asyncio
     async def test_check_sepsis_calls_sepsis_tool(self) -> None:
@@ -442,7 +444,9 @@ class TestSkillDispatch:
         task = _final_task(event_queue)
         assert task.status.state is TaskState.completed
         text = _final_text(event_queue)
-        assert "POLL_INTERVAL_SEC" in text
+        # New layout shows the clinician-facing watch-active confirmation
+        # with the patient id, not the raw env-var name.
+        assert "Watch" in text
         assert PATIENT_ID in text
 
 

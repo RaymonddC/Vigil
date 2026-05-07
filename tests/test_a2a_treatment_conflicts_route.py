@@ -271,9 +271,11 @@ class TestDispatch:
         )
 
         text = _final_text(event_queue)
-        assert "Treatment safety scan" in text
+        # New layout uses a clinician-facing severity badge and an
+        # explicit "Consider instead" alternatives block.
+        assert "Treatment safety" in text
         assert "NSAID" in text
-        assert "critical" in text
+        assert "CRITICAL" in text
         assert "KDIGO" in text
         assert "acetaminophen" in text
 
@@ -307,7 +309,9 @@ class TestDispatch:
         await executor.execute(ctx, event_queue)
 
         text = _final_text(event_queue)
-        assert "no conflicts detected" in text.lower()
+        # New layout: explicit "CLEAR" badge + "no conflicts" prose.
+        assert "CLEAR" in text
+        assert "no conflicts" in text.lower()
 
     @pytest.mark.asyncio
     async def test_synthetic_disclosure_prefixed(self) -> None:

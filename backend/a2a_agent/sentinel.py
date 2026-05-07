@@ -354,6 +354,13 @@ class PostopSentinelExecutor(AgentExecutor):
             sections.extend(_line(b) for b in yellow_breaches[:6])
         sections.append("")
         sections.append(action)
+        # Chain hint — direct the clinician to the skill that does
+        # multivariate trend analysis when they want direction-of-travel
+        # rather than a point-in-time threshold breach.
+        sections.append(
+            "\n*For trend direction across the last few hours, run "
+            "`score risk` — it computes qSOFA + composite trend.*"
+        )
 
         body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
@@ -382,27 +389,76 @@ class PostopSentinelExecutor(AgentExecutor):
         if err is not None:
             return err, _data_source(data)
 
-        band = data.get("risk_band", "unknown")
+        band = (data.get("risk_band") or "unknown").lower()
         qsofa = data.get("qsofa_score")
+        qsofa_components = data.get("qsofa_components") or {}
         composite = data.get("composite_risk")
         rationale = data.get("rationale") or "no rationale provided"
         comorbid = data.get("contributing_conditions") or []
 
         composite_str = (
-            f"`{composite:.2f}`" if isinstance(composite, (int, float))
-            else "`?`"
+            f"{composite:.2f}" if isinstance(composite, (int, float))
+            else "?"
         )
-        lines = [
-            f"Deterioration risk for `{patient_id}`: band `{band}` "
-            f"(qSOFA `{qsofa} / 3`, composite {composite_str}).",
-            f"Rationale: {rationale}",
+
+        # Band badge — converts an abstract score into a clear urgency
+        # tier. Mapping aligns with Singer Sepsis-3 (qSOFA ≥2 → high
+        # mortality risk) and ward escalation conventions.
+        band_badge = {
+            "high": "HIGH — escalate now",
+            "moderate": "MODERATE — increase surveillance",
+            "low": "LOW — routine monitoring",
+        }.get(band, f"{band.upper()} — review")
+
+        # Per-band time-to-action — turns "moderate" into a concrete
+        # clock the receiving clinician can plan around.
+        action = {
+            "high": (
+                "Continuous monitoring; covering MD or rapid-response "
+                "team within **30 min**. Consider ICU consult if "
+                "SBP <90 sustained or lactate >2 mmol/L."
+            ),
+            "moderate": (
+                "Hourly observations; MD review within **1 hour**. "
+                "Re-score with NEWS2 if any parameter worsens."
+            ),
+            "low": (
+                "Continue routine schedule; recheck in **4 hours** or "
+                "sooner if clinical concern."
+            ),
+        }.get(
+            band,
+            "Review with covering MD before next round.",
+        )
+
+        # qSOFA component check/cross marks (Sepsis-3, JAMA 2016).
+        # Letting the clinician audit the AI math is non-negotiable.
+        component_labels = [
+            ("rr_ge_22", "Resp rate ≥ 22"),
+            ("sbp_le_100", "SBP ≤ 100 mmHg"),
+            ("altered_mental", "Altered mentation (GCS <15)"),
+        ]
+        check_lines = [
+            f"- {'[x]' if qsofa_components.get(key) else '[ ]'} {label}"
+            for key, label in component_labels
+        ]
+
+        sections = [
+            f"### Deterioration risk — **{band_badge}** "
+            f"*(per qSOFA / Sepsis-3 JAMA 2016)*",
+            f"qSOFA **{qsofa} / 3** · composite **{composite_str}**",
+            "",
+            "**qSOFA components:**",
+            *check_lines,
         ]
         if comorbid:
-            lines.append(
-                "Contributing conditions: "
-                + ", ".join(f"`{c}`" for c in comorbid[:5])
+            sections.append(
+                "\n**Contributing conditions:** "
+                + ", ".join(comorbid[:5])
             )
-        body = "\n".join(lines)
+        sections.append(f"\n**Action**: {action}")
+        sections.append(f"\n*Rationale:* {rationale}")
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_check_sepsis(
@@ -696,30 +752,77 @@ class PostopSentinelExecutor(AgentExecutor):
         ttf = data.get("time_to_intervention_hours")
         rationale = data.get("rationale") or "no rationale provided"
 
-        creat_str = f"`{creat:.2f}`" if isinstance(creat, (int, float)) else "`?`"
+        creat_str = f"{creat:.2f}" if isinstance(creat, (int, float)) else "?"
         baseline_str = (
-            f"`{baseline:.2f}`" if isinstance(baseline, (int, float)) else "`?`"
+            f"{baseline:.2f}" if isinstance(baseline, (int, float)) else "?"
         )
-        if ttf is None:
-            ttf_str = "no urgent intervention indicated"
-        elif ttf == 0:
-            ttf_str = "**immediate** intervention (SCCM 2017)"
-        else:
-            ttf_str = f"intervention within `{ttf}h` (SCCM 2017)"
 
-        header = (
-            f"AKI assessment for `{patient_id}`: KDIGO **Stage "
-            f"{stage}**. SCr {creat_str} mg/dL vs baseline "
-            f"{baseline_str} mg/dL. Recommendation: {ttf_str}."
-        )
-        lines = [header]
+        # Compute creatinine delta + direction-of-travel arrow. Even
+        # without a 3-point trajectory in the tool output, showing the
+        # change vs. baseline as an arrow + percentage tells the
+        # clinician trajectory direction at a glance.
+        delta_str = ""
+        if isinstance(creat, (int, float)) and isinstance(baseline, (int, float)) and baseline > 0:
+            pct = ((creat - baseline) / baseline) * 100
+            arrow = "↑" if pct > 5 else ("↓" if pct < -5 else "↔")
+            delta_str = f" ({arrow} **{pct:+.0f}%** vs baseline)"
+
+        # Stage badge — KDIGO 2012 §2.1.1 staging mapped to its
+        # standard urgency tier.
+        stage_badge = {
+            0: "STAGE 0 — no AKI",
+            1: "STAGE 1 — increased surveillance",
+            2: "STAGE 2 — URGENT, nephrology consult",
+            3: "STAGE 3 — RRT readiness, ICU",
+        }.get(stage, f"STAGE {stage} — escalate")
+
+        # Time-to-intervention prompt per SCCM 2017 (Joannidis,
+        # Intensive Care Med 2017;43:730).
+        if ttf is None:
+            ttf_text = "No urgent intervention indicated."
+        elif ttf == 0:
+            ttf_text = "**Immediate** intervention required (SCCM 2017)."
+        else:
+            ttf_text = f"Intervention within **{ttf}h** (SCCM 2017)."
+
+        sections = [
+            f"### AKI — **{stage_badge}** *(per KDIGO 2012)*",
+            f"**SCr** {creat_str} mg/dL · **baseline** {baseline_str} mg/dL"
+            + delta_str,
+        ]
         if baseline_imputed:
-            lines.append(f"Baseline imputed — {baseline_source}.")
+            sections.append(
+                f"*Baseline imputed* — {baseline_source}. Per KDIGO 2012 "
+                "§3.1.2, lowest value in the prior 7 days is used when "
+                "no formal baseline is documented."
+            )
         if criteria:
-            lines.append("Criteria met:")
-            lines.extend(f"- {c}" for c in criteria[:5])
-        lines.append(f"Rationale: {rationale}")
-        body = "\n".join(lines)
+            sections.append("\n**Criteria met:**")
+            sections.extend(f"- {c}" for c in criteria[:5])
+
+        sections.append(f"\n**Time-to-intervention:** {ttf_text}")
+
+        # Nephrotoxin cross-reference prompt — the tool doesn't fetch
+        # MedicationRequest yet, so surface this as a clinician
+        # prompt. Always render at stage ≥1 because nephrotoxin review
+        # is the single most under-applied step in the AKI workup
+        # (KDIGO 2012 §3.4.2).
+        if stage >= 1:
+            sections.append(
+                "\n**Review medication list now** *(KDIGO 2012 §3.4.2)*: "
+                "stop or dose-adjust nephrotoxins — NSAIDs, ACE-I/ARBs, "
+                "aminoglycosides, IV contrast, vancomycin, sulfonamides. "
+                "Run `flag treatment conflicts` for an automated NSAID/AKI "
+                "and ACE-I/hyperkalemia scan."
+            )
+            if stage >= 2:
+                sections.append(
+                    "**Fluid balance**: review 24h I/O. Avoid hyperchloremic "
+                    "fluids (KDIGO 2012 §3.5)."
+                )
+
+        sections.append(f"\n*Rationale:* {rationale}")
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_score_news2(
@@ -746,30 +849,77 @@ class PostopSentinelExecutor(AgentExecutor):
         if err is not None:
             return err, _data_source(data)
 
-        agg = data.get("aggregate_score", 0)
-        band = data.get("band", "unknown")
+        agg = int(data.get("aggregate_score", 0) or 0)
+        band = (data.get("band") or "unknown").lower()
         red_flag = bool(data.get("red_flag"))
         contributions = data.get("parameter_contributions") or []
         rationale = data.get("rationale") or "no rationale provided"
 
-        flag_text = " — **red flag** (single-parameter 3)" if red_flag else ""
-        header = (
-            f"NEWS2 for `{patient_id}`: aggregate `{agg}/20`, band "
-            f"`{band}`{flag_text}."
+        # RCP NEWS2 2017 response framework — verbatim, since clinicians
+        # rely on the exact wording for protocol compliance.
+        # Single-parameter score of 3 overrides aggregate-band routing
+        # per the RCP 2017 escalation chart.
+        if red_flag and agg < 5:
+            response = (
+                "**Single-parameter score 3** — minimum hourly observations; "
+                "registered nurse must inform medical team for urgent review "
+                "by clinician with core competencies for acute illness."
+            )
+        elif agg >= 7 or band == "high":
+            response = (
+                "**Aggregate ≥7 (HIGH)** — continuous monitoring; emergency "
+                "clinical response by team with critical-care competencies; "
+                "consider transfer to higher-acuity setting (HDU/ICU)."
+            )
+        elif agg >= 5 or band == "medium":
+            response = (
+                "**Aggregate 5–6 (MEDIUM)** — minimum hourly observations; "
+                "urgent review by clinician with core competencies for "
+                "acute illness within 1 hour."
+            )
+        elif agg >= 1:
+            response = (
+                "**Aggregate 1–4 (LOW–MEDIUM)** — minimum 4–6 hourly "
+                "observations; registered nurse to assess and decide "
+                "whether to escalate frequency."
+            )
+        else:
+            response = (
+                "**Aggregate 0 (LOW)** — minimum 12-hourly observations; "
+                "continue routine NEWS monitoring."
+            )
+
+        # Band badge — first line, drives the eye.
+        band_badge = (
+            "HIGH" if (agg >= 7 or band == "high") else
+            "MEDIUM" if (agg >= 5 or band == "medium") else
+            "LOW–MEDIUM" if agg >= 1 else
+            "LOW"
         )
-        contrib_bullets = [
-            f"- `{c.get('parameter', '?')}` "
-            f"value=`{c.get('value', '?')}` "
-            f"score=`{c.get('score', 0)}`"
-            for c in contributions
-            if int(c.get("score", 0) or 0) > 0
+        red_flag_text = " · **RED FLAG** (single-parameter 3)" if red_flag else ""
+
+        sections = [
+            f"### NEWS2 — **{band_badge}** *(per RCP NEWS2 2017)*",
+            f"Aggregate **{agg} / 20**{red_flag_text}",
         ]
-        lines = [header]
-        if contrib_bullets:
-            lines.append("Non-zero contributions:")
-            lines.extend(contrib_bullets[:7])
-        lines.append(f"Rationale: {rationale}")
-        body = "\n".join(lines)
+
+        # Per-parameter score breakdown — bullet list (not a 4-col
+        # table, since PO crammed those). Show all params, not just
+        # non-zero, so the clinician can audit the full scoring.
+        if contributions:
+            sections.append("\n**Score breakdown:**")
+            for c in contributions[:8]:
+                param = c.get("parameter", "?")
+                value = c.get("value", "?")
+                score = int(c.get("score", 0) or 0)
+                marker = "**" if score >= 3 else ""
+                sections.append(
+                    f"- {param}: {value} → score {marker}{score}{marker}"
+                )
+
+        sections.append(f"\n**RCP response:** {response}")
+        sections.append(f"\n*Rationale:* {rationale}")
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_assess_pph(
@@ -891,45 +1041,73 @@ class PostopSentinelExecutor(AgentExecutor):
         safe_alts = data.get("safe_alternatives") or []
 
         if not conflicts:
-            body = (
-                f"Treatment safety scan for `{patient_id}`: "
-                "**no conflicts detected** across the 5 rules "
-                "(NSAID/AKI, β-blocker/bradycardia, "
-                "ACE-I/hyperkalemia, opioid/respiratory depression, "
-                "anticoagulant/bleeding). Order request can proceed "
-                "with standard monitoring."
-            )
-            return _with_disclosure(body, data), _data_source(data)
+            sections = [
+                "### Treatment safety — **CLEAR**",
+                "No conflicts across the 5 rule families "
+                "(NSAID/AKI, β-blocker/bradycardia, ACE-I/hyperkalemia, "
+                "opioid/respiratory depression, anticoagulant/bleeding).",
+                "",
+                "**Action**: Order may proceed with standard monitoring. "
+                "Reassess if AKI, hypotension, or bleeding develops.",
+            ]
+            return _with_disclosure("\n".join(sections), data), _data_source(data)
 
-        crit = sum(
-            1 for c in conflicts if c.get("severity") == "critical"
+        crit = sum(1 for c in conflicts if c.get("severity") == "critical")
+        warn = sum(1 for c in conflicts if c.get("severity") == "warning")
+
+        # Severity badge — leading the eye to urgency before any
+        # drug/rule detail.
+        if crit > 0:
+            badge = "CRITICAL — do not order"
+        elif warn > 0:
+            badge = "WARNING — review before ordering"
+        else:
+            badge = "ADVISORY"
+
+        sections = [
+            f"### Treatment safety — **{badge}**",
+            f"{len(conflicts)} conflict(s) — **{crit} critical**, "
+            f"**{warn} warning**.",
+        ]
+
+        # Per-conflict card — drug, severity, physiology snapshot
+        # at-time-of-order (proof), citation, and verbatim mitigation.
+        # Order: critical first.
+        ordered = sorted(
+            conflicts,
+            key=lambda c: 0 if c.get("severity") == "critical" else 1,
         )
-        warn = sum(
-            1 for c in conflicts if c.get("severity") == "warning"
-        )
-        header = (
-            f"Treatment safety scan for `{patient_id}`: "
-            f"`{len(conflicts)}` conflict(s) — `{crit}` critical, "
-            f"`{warn}` warning."
-        )
-        lines: list[str] = [header]
-        for c in conflicts[:5]:
-            sev = c.get("severity", "?")
+        for c in ordered[:5]:
+            sev = (c.get("severity") or "?").upper()
             drug_class = c.get("drug_class", "?")
             drug_disp = c.get("drug_display", "?")
             physio = c.get("physiology_summary", "?")
             cite = c.get("citation_anchor", "?")
             mitig = c.get("mitigation", "?")
-            lines.append(
-                f"- **[{sev}] {drug_class}** (`{drug_disp}`) vs "
-                f"{physio}. Cite: {cite}. Mitigation: {mitig}"
+            sections.append(
+                f"\n**[{sev}] {drug_class}** — `{drug_disp}`"
             )
+            sections.append(f"- *Physiology at order*: {physio}")
+            sections.append(f"- *Mitigation*: {mitig}")
+            sections.append(f"- *Cite*: {cite}")
+
+        # Safe alternatives — promoted to a prominent "Consider instead"
+        # block, never just a tail list. Ordering away from a
+        # contraindication is half the answer; the other half is what
+        # to write instead.
         if safe_alts:
-            lines.append(
-                "Safe alternatives: "
-                + ", ".join(f"`{a}`" for a in safe_alts[:6])
+            sections.append("\n**Consider instead:**")
+            sections.extend(f"- `{a}`" for a in safe_alts[:6])
+
+        # Override workflow nudge — real EHRs require documentation
+        # for high-severity overrides; remind the prescriber.
+        if crit > 0:
+            sections.append(
+                "\n*If clinically essential to override, document: "
+                "indication, alternative considered, monitoring plan, "
+                "and consenting clinician.*"
             )
-        body = "\n".join(lines)
+        body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_start_watching(
@@ -966,35 +1144,66 @@ class PostopSentinelExecutor(AgentExecutor):
             logger.exception("review queue read failed in start_watching")
             pending, superseded, last_seen = 0, 0, None
 
-        if interval_sec > 0:
-            cadence = (
-                f"Vigil is actively watching every {interval_sec}s "
-                f"(deployment-wide cadence)."
-            )
+        # Phrase the cadence the way a charge nurse would expect ("every
+        # 5 min") rather than as raw seconds.
+        if interval_sec >= 60 and interval_sec % 60 == 0:
+            cadence_human = f"every {interval_sec // 60} min"
+        elif interval_sec > 0:
+            cadence_human = f"every {interval_sec}s"
         else:
-            cadence = (
-                "Vigil's autonomous loop is currently disabled "
-                "(`POLL_INTERVAL_SEC=0`); skills run on-demand only."
+            cadence_human = "(disabled — POLL_INTERVAL_SEC=0)"
+
+        # Format the most recent alert time + age for this patient. The
+        # autonomous loop doesn't expose its actual last-tick time, but
+        # last_alert_at is a useful proxy: it confirms the loop has been
+        # screening this patient and tells the clinician how fresh the
+        # info is.
+        from datetime import UTC, datetime
+        last_seen_str = "no alerts raised yet"
+        if last_seen:
+            try:
+                seen_dt = datetime.fromisoformat(
+                    last_seen.replace("Z", "+00:00")
+                )
+                age_min = int((datetime.now(UTC) - seen_dt).total_seconds() // 60)
+                if age_min < 60:
+                    last_seen_str = f"last alert {age_min} min ago"
+                else:
+                    last_seen_str = f"last alert {age_min // 60}h {age_min % 60}m ago"
+            except (ValueError, AttributeError):
+                last_seen_str = f"last alert at {last_seen}"
+
+        if interval_sec <= 0:
+            return (
+                "### Watch — DISABLED\n"
+                "Vigil's autonomous loop is off (`POLL_INTERVAL_SEC=0`). "
+                "Skills run on-demand only. To enable continuous monitoring "
+                "for this ward, set a positive interval and restart the "
+                "agent service."
             )
 
-        history_bits: list[str] = []
-        if pending:
-            history_bits.append(f"{pending} pending alert(s) in the review queue")
-        if superseded:
-            history_bits.append(f"{superseded} superseded alert(s)")
-        if last_seen:
-            history_bits.append(f"last alert at {last_seen}")
-        history = (
-            "Patient history: " + "; ".join(history_bits) + "."
-            if history_bits
-            else f"No alerts have been raised for `{patient_id}` yet."
-        )
-
-        return (
-            f"{cadence} {history} "
-            "Programmatic per-patient enable/disable is post-MVP — to change "
-            "cadence, update `POLL_INTERVAL_SEC` and restart the agent service."
-        )
+        sections = [
+            f"### Watch — ACTIVE for `{patient_id}`",
+            f"Autonomous loop polls **{cadence_human}** across the postop "
+            f"& postpartum cohort.",
+            "",
+            "**This patient's review-queue history:**",
+            f"- {pending} pending alert{'s' if pending != 1 else ''}",
+            f"- {superseded} superseded alert{'s' if superseded != 1 else ''}",
+            f"- {last_seen_str}",
+        ]
+        if pending == 0 and superseded == 0:
+            sections.append(
+                "\nNo alerts have fired for this patient on Vigil's "
+                "monitored cohort yet — but the loop will continue to "
+                "screen on every tick."
+            )
+        elif pending > 0:
+            sections.append(
+                "\n**Action**: Review pending alert via "
+                "`show recent alerts`, then claim or supersede."
+            )
+        return "\n".join(sections)
 
     async def _handle_list_recent_alerts(self) -> str:
         """Return alerts the autonomous loop has surfaced on Vigil's HAPI.
