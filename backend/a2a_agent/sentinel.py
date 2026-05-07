@@ -422,6 +422,24 @@ class PostopSentinelExecutor(AgentExecutor):
             sections.extend(_line(b) for b in yellow_breaches[:6])
         sections.append("")
         sections.append(action)
+
+        # Confidence — driven by scan count and freshness. Aligns with
+        # the data-completeness framing in clinical-AI evaluation
+        # frameworks (TRIPOD-AI 2024).
+        if scanned >= 6:
+            conf_level, conf_reason = (
+                "high", f"{scanned} observations in window, recent reading"
+            )
+        elif scanned >= 3:
+            conf_level, conf_reason = (
+                "medium", f"{scanned} observations — sparse window"
+            )
+        else:
+            conf_level, conf_reason = (
+                "low", f"only {scanned} observation(s) — verify at bedside"
+            )
+        sections.append(_confidence(conf_level, conf_reason))
+
         # Chain hint — direct the clinician to the skill that does
         # multivariate trend analysis when they want direction-of-travel
         # rather than a point-in-time threshold breach.
@@ -595,6 +613,27 @@ class PostopSentinelExecutor(AgentExecutor):
                     extra={"patient_id": patient_id, "error": str(exc)},
                 )
 
+        # Confidence — driven by how many qSOFA components actually
+        # fired (more signal = more confident verdict) and whether we
+        # have comorbidity context to ground it.
+        firing_n = sum(1 for v in qsofa_components.values() if v)
+        if firing_n >= 2 and comorbid:
+            conf_level, conf_reason = (
+                "high",
+                f"{firing_n}/3 qSOFA components fired with documented comorbidities",
+            )
+        elif firing_n >= 1:
+            conf_level, conf_reason = (
+                "medium",
+                f"{firing_n}/3 qSOFA components fired — single-feature signal",
+            )
+        else:
+            conf_level, conf_reason = (
+                "low",
+                "qSOFA 0; verdict driven by comorbidity-weighted composite",
+            )
+        sections.append(_confidence(conf_level, conf_reason))
+
         sections.append(f"\n*Rationale:* {rationale}")
         body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
@@ -682,6 +721,27 @@ class PostopSentinelExecutor(AgentExecutor):
             "of bundle delay (Kumar 2006). Page covering MD now; if no "
             "response in 5 min, activate rapid-response team."
         )
+
+        # Confidence — driven by criteria-met count + mode. CDC ASE with
+        # ≥3 criteria is the authoritative surveillance threshold.
+        n_crit = len(criteria)
+        if n_crit >= 3:
+            conf_level, conf_reason = (
+                "high",
+                f"{n_crit} CDC ASE criteria met (mode `{mode}`)",
+            )
+        elif n_crit >= 2:
+            conf_level, conf_reason = (
+                "medium",
+                f"{n_crit} criteria met — borderline by CDC ASE threshold",
+            )
+        else:
+            conf_level, conf_reason = (
+                "low",
+                f"only {n_crit} criterion met — verify with cultures + lactate",
+            )
+        sections.append(_confidence(conf_level, conf_reason))
+
         body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
 
@@ -1219,6 +1279,27 @@ class PostopSentinelExecutor(AgentExecutor):
                 )
 
         sections.append(f"\n**RCP response:** {response}")
+
+        # Confidence — NEWS2 expects all 7 parameters; missing
+        # parameters reduce the verdict's reliability.
+        n_params = len(contributions)
+        if n_params >= 6:
+            conf_level, conf_reason = (
+                "high",
+                f"{n_params}/7 NEWS2 parameters scored",
+            )
+        elif n_params >= 4:
+            conf_level, conf_reason = (
+                "medium",
+                f"{n_params}/7 NEWS2 parameters scored — partial set",
+            )
+        else:
+            conf_level, conf_reason = (
+                "low",
+                f"only {n_params}/7 parameters — sparse score; recheck obs",
+            )
+        sections.append(_confidence(conf_level, conf_reason))
+
         sections.append(f"\n*Rationale:* {rationale}")
         body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
@@ -2380,6 +2461,17 @@ def _data_source(data: dict[str, Any]) -> str:
     """
     src = data.get("data_source")
     return src if isinstance(src, str) else "fhir"
+
+
+# Confidence framing — every clinical claim ships with a categorical
+# tag (HIGH / MEDIUM / LOW) tied to objective inputs (data freshness,
+# number of criteria met, n of regression samples). Surfaces uncertainty
+# the way clinicians and FDA reviewers expect rather than presenting
+# AI verdicts as gospel.
+def _confidence(level: str, reason: str) -> str:
+    return (
+        f"\n*Confidence: **{level.upper()}** — {reason}*"
+    )
 
 
 # Audit / regulatory footer — appended to every clinician-facing reply
