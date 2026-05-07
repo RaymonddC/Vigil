@@ -10,8 +10,11 @@ which writes Communication (status=completed) + AuditEvent. See API_CONTRACTS.md
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -30,6 +33,24 @@ from backend.obs.metrics import append_event
 from backend.schemas import ApproveRequest, ApproveResponse, FhirContext
 
 logger = get_logger(__name__)
+
+
+# Vigil agent identity — version + AgentCard hash carried into every
+# FHIR write so AI authorship is verifiable for hospital procurement
+# and FDA SaMD review. Computed once at import time; the AgentCard
+# JSON is part of the deployed image so the hash is stable per build.
+_AGENT_CARD_PATH = (
+    Path(__file__).resolve().parents[2] / "a2a_agent" / "agent_card.json"
+)
+try:
+    _agent_card_bytes = _AGENT_CARD_PATH.read_bytes()
+    _VIGIL_AGENT_CARD_HASH = hashlib.sha256(_agent_card_bytes).hexdigest()
+    _VIGIL_VERSION = json.loads(_agent_card_bytes).get("version", "0.0.0")
+except (OSError, ValueError):
+    # Image without the AgentCard (test fixture, partial build) — fall
+    # back to known-bad markers so this surfaces if it ever ships.
+    _VIGIL_AGENT_CARD_HASH = "0" * 64
+    _VIGIL_VERSION = "0.0.0-unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -72,16 +93,76 @@ async def _ensure_vigil_referenced_resources(
     in Communication.recipient. Patient and Encounter come from synthetic seed
     so they always exist. Same ids every call → safe to invoke per request.
     """
-    # Vigil agent Device — referenced by sender + AuditEvent.source.observer
+    # Vigil agent Device — referenced by sender + AuditEvent.source.observer.
+    # Beefed up with US Core profile, software-version, and a content
+    # hash so AI-authored writes carry verifiable provenance for hospital
+    # procurement and FDA SaMD review (real deployment posture).
     await client.put_resource(
         "Device",
         "vigil-postop-sentinel",
         {
+            "meta": {
+                "profile": [
+                    "http://hl7.org/fhir/us/core/StructureDefinition/us-core-implantable-device"
+                ],
+            },
+            "identifier": [
+                {
+                    "system": "http://vigil.local/agent-id",
+                    "value": "vigil-postop-sentinel",
+                }
+            ],
             "deviceName": [
-                {"name": "Vigil Postop Sentinel", "type": "user-friendly-name"}
+                {"name": "Vigil Postop & Postpartum Sentinel", "type": "user-friendly-name"}
             ],
             "manufacturer": "Vigil (Agents Assemble 2026)",
-            "modelNumber": "v0.1.0",
+            "modelNumber": _VIGIL_VERSION,
+            "version": [
+                {
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "http://terminology.hl7.org/CodeSystem/device-version-type",
+                                "code": "software",
+                            }
+                        ]
+                    },
+                    "value": _VIGIL_VERSION,
+                }
+            ],
+            "property": [
+                {
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "http://vigil.local/device-property",
+                                "code": "agent-card-hash",
+                                "display": "AgentCard SHA-256",
+                            }
+                        ]
+                    },
+                    "valueCode": [{"code": _VIGIL_AGENT_CARD_HASH[:16]}],
+                },
+                {
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "http://vigil.local/device-property",
+                                "code": "deterministic-rule-pack",
+                                "display": "Deterministic rule pack version",
+                            }
+                        ]
+                    },
+                    "valueCode": [
+                        {
+                            "code": (
+                                "MEWS-2001 / qSOFA-2016 / NEWS2-2017 / "
+                                "KDIGO-2012 / CMQCC-3.0 / CDC-ASE"
+                            )
+                        }
+                    ],
+                },
+            ],
             "type": {
                 "coding": [
                     {
@@ -397,11 +478,20 @@ async def approve_alert_action(
     ctx = _make_fhir_context(fhir_base_url, token=fhir_token)
     now = datetime.now(UTC)
 
-    # Build Communication with status flipped to completed
+    # Build Communication with status flipped to completed. Stamp
+    # meta.profile so HAPI / downstream validators recognise this as
+    # a US Core Communication (rather than a free-form one).
     comm_draft: dict[str, Any] = dict(alert["communication_draft"])
     comm_draft["status"] = "completed"
     comm_draft["sent"] = now.isoformat()
     comm_draft.pop("id", None)  # HAPI assigns the id
+    comm_meta = dict(comm_draft.get("meta") or {})
+    comm_meta.setdefault("profile", []).append(
+        "http://hl7.org/fhir/us/core/StructureDefinition/us-core-communication"
+    )
+    # Dedupe — repeat approve calls would otherwise stack the URL.
+    comm_meta["profile"] = list(dict.fromkeys(comm_meta["profile"]))
+    comm_draft["meta"] = comm_meta
 
     # POST Communication → HAPI; revert lock on failure so a retry can proceed
     try:
@@ -418,9 +508,88 @@ async def approve_alert_action(
 
     comm_id = comm_response.get("id", f"comm-{uuid.uuid4().hex[:8]}")
 
-    # Build AuditEvent (API_CONTRACTS.md §5.7)
+    # Provenance — FHIR R4 attestation that the Communication was
+    # AI-authored (Vigil agent) and clinician-approved. Tells any
+    # downstream EHR consumer the provenance chain explicitly. Hash
+    # of the AgentCard is stamped via signature.data so a regulator
+    # can audit which model version produced this alert.
+    provenance: dict[str, Any] = {
+        "resourceType": "Provenance",
+        "meta": {
+            "profile": [
+                "http://hl7.org/fhir/us/core/StructureDefinition/us-core-provenance"
+            ]
+        },
+        "target": [{"reference": f"Communication/{comm_id}"}],
+        "recorded": now.isoformat(),
+        "occurredDateTime": now.isoformat(),
+        "agent": [
+            {
+                "type": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type",
+                            "code": "author",
+                            "display": "Author",
+                        }
+                    ]
+                },
+                "who": {"reference": "Device/vigil-postop-sentinel"},
+                "onBehalfOf": {"reference": f"Practitioner/{body.clinician_id}"},
+            },
+            {
+                "type": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type",
+                            "code": "verifier",
+                            "display": "Verifier",
+                        }
+                    ]
+                },
+                "who": {"reference": f"Practitioner/{body.clinician_id}"},
+            },
+        ],
+        "signature": [
+            {
+                "type": [
+                    {
+                        "system": "urn:iso-astm:E1762-95:2013",
+                        "code": "1.2.840.10065.1.12.1.1",
+                        "display": "Author's Signature",
+                    }
+                ],
+                "when": now.isoformat(),
+                "who": {"reference": "Device/vigil-postop-sentinel"},
+                "targetFormat": "application/fhir+json",
+                "sigFormat": "application/x-vigil-agent-card-sha256",
+                "data": _VIGIL_AGENT_CARD_HASH,
+            }
+        ],
+    }
+
+    # POST Provenance — soft failure (don't roll back Communication).
+    # The Communication itself is the regulatory artifact; Provenance
+    # is enrichment for hospital procurement / audit pipelines.
+    try:
+        async with FhirClient(ctx) as client:
+            await client.post_resource("Provenance", provenance)
+    except FhirClientError as exc:
+        logger.warning(
+            "Provenance POST failed (non-fatal)",
+            extra={"_vigil_error": str(exc), "_vigil_comm_id": comm_id},
+        )
+
+    # Build AuditEvent (API_CONTRACTS.md §5.7). meta.profile stamps
+    # the FHIR R4 AuditEvent profile so downstream audit pipelines
+    # recognise it as a standard event, not a custom one.
     audit_event: dict[str, Any] = {
         "resourceType": "AuditEvent",
+        "meta": {
+            "profile": [
+                "http://hl7.org/fhir/StructureDefinition/AuditEvent"
+            ]
+        },
         "type": {
             "system": "http://dicom.nema.org/resources/ontology/DCM",
             "code": "110100",

@@ -117,7 +117,11 @@ async def test_concurrent_approves_one_wins_one_409():
     statuses = sorted([r1.status_code, r2.status_code])
     assert statuses == [200, 409], f"expected [200, 409], got {statuses}"
 
-    # Winner posts Communication + AuditEvent; loser never reaches HAPI
-    assert len(hapi_calls) == 2, f"expected 2 HAPI calls, got {hapi_calls}"
+    # Winner posts Communication + Provenance + AuditEvent; loser
+    # never reaches HAPI. Provenance is the new attestation resource
+    # (Vigil agent author + clinician verifier + AgentCard hash) added
+    # for hospital procurement / FDA SaMD review readiness.
+    assert len(hapi_calls) == 3, f"expected 3 HAPI calls, got {hapi_calls}"
     assert "Communication" in hapi_calls
+    assert "Provenance" in hapi_calls
     assert "AuditEvent" in hapi_calls
