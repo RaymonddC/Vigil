@@ -254,26 +254,35 @@ class PostopSentinelExecutor(AgentExecutor):
 
         if not breaches:
             body = (
-                f"Vital screen for `{patient_id}`: no MEWT breaches across "
-                f"`{scanned}` recent observations. All vitals within "
-                "thresholds."
+                f"**Vital screen** — patient `{patient_id}`\n\n"
+                f"No MEWT breaches across {scanned} recent observations. "
+                "All vitals within thresholds."
             )
             return _with_disclosure(body, data), _data_source(data)
 
         red = sum(1 for b in breaches if b.get("severity") == "red")
         yellow = sum(1 for b in breaches if b.get("severity") == "yellow")
-        header = (
-            f"Vital screen for `{patient_id}` (status `{status}`): "
-            f"`{len(breaches)}` MEWT breach(es) — `{red}` red, `{yellow}` "
-            f"yellow — across `{scanned}` observations."
-        )
-        bullets = [
-            f"- `{b.get('label', '?')}` `{b.get('value', '?')} "
-            f"{b.get('unit', '')}` (threshold `{b.get('threshold', '?')}`, "
-            f"`{b.get('severity', '?')}`)"
-            for b in breaches[:5]
+
+        rows = [
+            "| Vital | Value | Threshold | Severity |",
+            "|---|---|---|---|",
         ]
-        body = "\n".join([header, *bullets])
+        for b in breaches[:8]:
+            sev = b.get("severity", "?")
+            rows.append(
+                f"| {b.get('label', '?')} "
+                f"| {b.get('value', '?')} {b.get('unit', '')} "
+                f"| {b.get('threshold', '?')} "
+                f"| **{sev}** |"
+            )
+
+        body = (
+            f"**Vital screen** — patient `{patient_id}` "
+            f"(status: **{status}**)\n\n"
+            f"{len(breaches)} MEWT breach(es) — "
+            f"**{red} red**, **{yellow} yellow** — across {scanned} observations.\n\n"
+            + "\n".join(rows)
+        )
         return _with_disclosure(body, data), _data_source(data)
 
     async def _handle_score_risk(

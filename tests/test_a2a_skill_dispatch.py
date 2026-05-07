@@ -223,7 +223,7 @@ class TestSkillDispatch:
         text = _final_text(event_queue)
         assert "Vital screen" in text
         assert PATIENT_ID in text
-        assert "no MEWT breaches" in text
+        assert "MEWT breaches" in text.lower() or "no mewt breaches" in text.lower()
 
     @pytest.mark.asyncio
     async def test_score_risk_calls_risk_tool(self) -> None:
