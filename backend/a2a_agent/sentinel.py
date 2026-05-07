@@ -179,6 +179,14 @@ class PostopSentinelExecutor(AgentExecutor):
                 text = await self._handle_list_recent_alerts()
             elif skill is SkillId.TICK_NOW:
                 text = await self._handle_tick_now()
+            elif skill is SkillId.READ_NURSING_SIGNALS:
+                text, data_source = await self._handle_read_nursing_signals(
+                    sharp_headers, patient_id
+                )
+            elif skill is SkillId.EXPLAIN:
+                text = await self._handle_explain(
+                    sharp_headers, patient_id, context.message
+                )
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -1546,6 +1554,219 @@ class PostopSentinelExecutor(AgentExecutor):
             "\nAsk `show recent alerts` for full review-queue detail."
         )
         return "\n".join(sections) + _AUDIT_FOOTER_LIVE
+
+    async def _handle_read_nursing_signals(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """LLM-extract subjective deterioration signals from nursing notes.
+
+        Threshold-based screens (MEWT, NEWS2) catch deterioration *after*
+        it shows in vitals. The most reliable early signal in postop care
+        is what the bedside nurse writes in free text — "feeling off",
+        "doesn't look right", "increasingly restless". Vital-sign rule
+        engines literally cannot read those.
+
+        This handler fetches the patient's vital-signs Observations (which
+        carry ``Observation.note`` from the seeder), feeds the free-text
+        notes to the LLM with a structured-extraction prompt, and renders
+        the signals as actionable bullets. If FHIR is unreachable, returns
+        a friendly message.
+        """
+        from backend.fhir.client import FhirClient, FhirClientError
+        from backend.llm.provider import LLMError, get_provider
+        from backend.schemas import FhirContext
+
+        fhir_ctx = FhirContext(
+            url=sharp_headers.get("x-fhir-server-url", ""),
+            token=sharp_headers.get("x-fhir-access-token"),
+            patient_id=sharp_headers.get("x-patient-id"),
+        )
+
+        try:
+            async with FhirClient(fhir_ctx) as fhir:
+                observations = await fhir.get_observations(
+                    patient_id, category="vital-signs"
+                )
+        except FhirClientError as exc:
+            logger.warning(
+                "nursing-signals FHIR fetch failed",
+                extra={"patient_id": patient_id, "error": str(exc)},
+            )
+            return (
+                f"I couldn't read nursing notes for `{patient_id}` because "
+                f"the FHIR server was unreachable: {exc}.",
+                "fhir",
+            )
+
+        # Pull free-text notes from each observation, with timestamps so
+        # the LLM sees the chronology. Dedupe identical strings (the
+        # seeder attaches the same note to one observation per timepoint;
+        # in real EHRs a single note may appear across multiple obs).
+        note_entries: list[tuple[Any, str]] = []
+        seen: set[str] = set()
+        for obs in observations:
+            for n in obs.note or []:
+                txt = (n.text or "").strip()
+                if not txt or txt in seen:
+                    continue
+                seen.add(txt)
+                ts = obs.effectiveDateTime
+                note_entries.append((ts, txt))
+        note_entries.sort(key=lambda p: p[0] or "")
+
+        if not note_entries:
+            return (
+                f"### Nursing notes — none on file\n"
+                f"No free-text nursing notes found for `{patient_id}` in "
+                "the recent observation window. Subjective signal review "
+                "needs the bedside team to document — vital signs alone "
+                "miss soft signs that precede deterioration.",
+                "fhir",
+            )
+
+        # Build the prompt — keep notes inline, ask for structured
+        # extraction with quoted phrases. Cap at 8 notes to control
+        # token use and keep the LLM's signal-to-noise high.
+        notes_block = "\n".join(
+            f"- {ts.isoformat() if hasattr(ts, 'isoformat') else ts}: \"{txt}\""
+            for ts, txt in note_entries[-8:]
+        )
+        prompt = (
+            "You are an experienced postop ward nurse reviewing colleagues' "
+            "documentation for early deterioration signals. Read the notes "
+            "below (oldest first) and identify subjective signs that the "
+            "patient is becoming unstable, even if vital signs haven't yet "
+            "crossed thresholds.\n\n"
+            f"Patient: {patient_id}\n"
+            f"Notes:\n{notes_block}\n\n"
+            "Output rules:\n"
+            "- Output 1-5 markdown bullets, one per signal you found.\n"
+            "- Each bullet: quote the exact phrase in double quotes, then "
+            "one short clause explaining clinical significance.\n"
+            "- If the notes are routine (pain controlled, ambulating, "
+            "vitals stable, family at bedside), output exactly one bullet "
+            "saying so and nothing else.\n"
+            "- Do NOT invent signals not present in the notes.\n"
+            "- Do NOT output any introduction or conclusion text."
+        )
+
+        try:
+            provider = get_provider()
+            llm_text = (await provider.complete(prompt, max_tokens=400)).strip()
+        except LLMError as exc:
+            logger.warning(
+                "nursing-signals LLM call failed",
+                extra={"patient_id": patient_id, "error": str(exc)},
+            )
+            # Fall back to listing the raw notes so the clinician at
+            # least sees the source material.
+            llm_text = "\n".join(
+                f"- (raw) \"{txt}\"" for _, txt in note_entries[-5:]
+            )
+
+        sections = [
+            "### Nursing-note signals",
+            f"LLM-extracted from **{len(note_entries)}** free-text "
+            "nursing note(s). Subjective signs precede vital-sign breach "
+            "by 30–60 min in most postop deterioration; this surface "
+            "complements `screen vitals`, it doesn't replace it.",
+            "",
+            llm_text,
+            "",
+            "*Signal extraction is generative — verify against the "
+            "original notes before acting. Source: deterministic FHIR "
+            "fetch + LLM-narrated extraction.*",
+        ]
+        return "\n".join(sections) + _AUDIT_FOOTER_LIVE, "fhir"
+
+    async def _handle_explain(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+        message: Any,
+    ) -> str:
+        """LLM-driven conversational follow-up.
+
+        When a clinician asks a free-text question ("why did you flag this
+        if SBP is only 92?", "could it be the antibiotic instead?"), the
+        canned skill replies don't fit. This handler runs the question
+        through the LLM with the patient context, returning a short
+        consultative answer. It deliberately does NOT make escalation
+        decisions — it only explains, suggests, or chains to a more
+        specific skill.
+        """
+        from backend.llm.provider import LLMError, get_provider
+
+        # Pull the user's question text from the inbound message.
+        parts = getattr(message, "parts", None) or []
+        question = ""
+        for part in parts:
+            text = getattr(part, "text", None)
+            if isinstance(text, str):
+                question = text
+                break
+            root = getattr(part, "root", None)
+            if root is not None:
+                rtext = getattr(root, "text", None)
+                if isinstance(rtext, str):
+                    question = rtext
+                    break
+        question = question.strip()
+
+        if not question:
+            return (
+                "I couldn't find a question to answer. Try `why did you "
+                "escalate this?` or `could this be sepsis instead?`."
+                + _AUDIT_FOOTER_LIVE
+            )
+
+        prompt = (
+            "You are Vigil — a postop and postpartum sentinel agent acting "
+            "as a clinical consultant via Prompt Opinion's general-chat "
+            "agent. A clinician is asking a follow-up question about the "
+            "patient currently in scope.\n\n"
+            f"Patient ID: {patient_id}\n"
+            f"Question: {question}\n\n"
+            "Answer rules:\n"
+            "- 3-5 sentences max. No bullet salad.\n"
+            "- Cite the deterministic guideline if relevant: "
+            "Subbe MEWS 2001, qSOFA Sepsis-3 JAMA 2016, NEWS2 RCP 2017, "
+            "KDIGO 2012, CDC ASE, CMQCC v3.0.\n"
+            "- If the answer requires fresh measurements you don't have, "
+            "say so and suggest exactly which Vigil skill to run "
+            "(`screen vitals`, `score risk`, `check sepsis`, `assess AKI`, "
+            "`assess postpartum hemorrhage`, `score NEWS2`, "
+            "`flag treatment conflicts`, `draft an SBAR`, `read nursing "
+            "notes`, `show recent alerts`).\n"
+            "- NEVER make an escalation decision (page MD, activate RRT). "
+            "Vigil's HITL invariant is that the clinician decides; you "
+            "advise."
+        )
+
+        try:
+            provider = get_provider()
+            answer = (await provider.complete(prompt, max_tokens=400)).strip()
+        except LLMError as exc:
+            logger.warning(
+                "explain LLM call failed",
+                extra={"patient_id": patient_id, "error": str(exc)},
+            )
+            return (
+                f"I couldn't answer that right now — the LLM provider "
+                f"`{getattr(exc, 'provider', 'unknown')}` is unavailable. "
+                "Try one of the structured skills (`screen vitals`, "
+                "`score risk`, etc.) for a deterministic answer."
+                + _AUDIT_FOOTER_LIVE
+            )
+
+        return (
+            f"### Follow-up — `{patient_id}`\n"
+            f"**Q:** {question}\n\n"
+            f"{answer}"
+            + _AUDIT_FOOTER_LIVE
+        )
 
     # ---------------------------------------------------------------
     # Internal helpers

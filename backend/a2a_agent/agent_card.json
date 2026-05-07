@@ -103,6 +103,18 @@
       "name": "Run autonomous monitoring cycle now",
       "description": "Runs one autonomous-loop cycle synchronously across every patient in Vigil's HAPI cohort, instead of waiting up to POLL_INTERVAL_SEC for the next scheduled tick. Returns a summary of patients screened and alerts enqueued. Useful in demos and on-demand re-checks — a follow-up `list_recent_alerts` reflects the new state immediately.",
       "tags": ["watch", "monitor", "tick", "autonomous", "demo"]
+    },
+    {
+      "id": "vigil.read_nursing_signals",
+      "name": "Read nursing notes for early-deterioration signals",
+      "description": "LLM-extracts subjective deterioration signals from free-text nursing notes ('patient feels off', 'doesn't look right', 'increasingly restless') that vital-sign threshold engines literally cannot read. Subjective bedside language precedes vital-sign breach by 30-60 min in most postop deterioration. Returns the quoted phrases plus one-clause clinical significance, or 'routine' if notes are unremarkable.",
+      "tags": ["nursing", "notes", "nlp", "soft-signs", "subjective", "early-warning"]
+    },
+    {
+      "id": "vigil.explain",
+      "name": "Answer a clinician follow-up question",
+      "description": "Conversational follow-up on a prior Vigil reply. Takes a free-text clinician question ('why did you escalate?', 'could it be the antibiotic instead?', 'what about dehydration?') and answers in 3-5 sentences with cited guideline anchors. Suggests the right Vigil skill if the question needs fresh data. Never makes an escalation decision — only explains, suggests, or chains. Preserves the HITL invariant.",
+      "tags": ["explain", "follow-up", "consult", "conversational"]
     }
   ],
   "securitySchemes": {

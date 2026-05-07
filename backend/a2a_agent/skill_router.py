@@ -35,6 +35,8 @@ class SkillId(StrEnum):
     FLAG_TREATMENT_CONFLICTS = "vigil.flag_treatment_conflicts"
     LIST_RECENT_ALERTS = "vigil.list_recent_alerts"
     TICK_NOW = "vigil.tick_now"
+    READ_NURSING_SIGNALS = "vigil.read_nursing_signals"
+    EXPLAIN = "vigil.explain"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -62,6 +64,31 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
         ("tick now", "run a tick", "run the loop", "trigger tick",
          "force tick", "run cycle now", "run a cycle"),
         SkillId.TICK_NOW,
+    ),
+    # Nursing-note NLP — must come BEFORE generic vitals/screen keywords
+    # because phrases like "read the nursing notes" / "what did the
+    # nurses observe" are about the free-text notes, not the threshold
+    # screen. Subjective deterioration signals (LLM-extracted) are
+    # something a rule engine literally cannot do.
+    (
+        ("nursing notes", "nurses note", "nurses noted", "nursing observations",
+         "what did the nurses", "what do the nurses",
+         "subjective signs", "subjective signals", "soft signs",
+         "patient feels off", "doesn't look right", "doesnt look right",
+         "doesn't feel right", "doesnt feel right",
+         "what did the nurse write", "read the notes", "show the notes"),
+        SkillId.READ_NURSING_SIGNALS,
+    ),
+    # Conversational follow-up — answers an arbitrary clinical question
+    # in the context of this patient. Must come BEFORE generic skill
+    # keywords so questions like "why did you escalate?" route here
+    # rather than re-running screen/score skills.
+    (
+        ("why did you", "why is this", "explain why", "explain that",
+         "how did you", "what does this mean", "could it be",
+         "could this be", "is it possible", "what about",
+         "follow up question", "follow-up question", "tell me more"),
+        SkillId.EXPLAIN,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
