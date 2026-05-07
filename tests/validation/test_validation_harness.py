@@ -26,12 +26,12 @@ Reference:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from backend.criteria.mewt import VitalReading, evaluate_mewt
-from data.seed_hapi import LABS, PATIENTS, VITALS
+from data.seed_hapi import PATIENTS, VITALS
 
 # LOINC codes used in the seed-data tables.
 _LOINC_BY_KEY = {
@@ -90,7 +90,7 @@ def _replay_patient(p: dict) -> _PatientResult:
     """Replay one patient's MEWT screen at every timepoint."""
     trajectory = p["trajectory"]
     pid = p["id"]
-    anchor = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+    anchor = datetime(2026, 5, 7, 12, 0, tzinfo=UTC)
 
     # Map seed trajectory keys to MEWT trajectory selector.
     mewt_traj = "postpartum" if trajectory == "pph" else "postop"

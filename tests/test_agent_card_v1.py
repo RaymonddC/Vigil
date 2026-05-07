@@ -40,6 +40,8 @@ EXPECTED_SKILL_IDS = {
     "vigil.read_nursing_signals",
     "vigil.explain",
     "vigil.forecast_trajectory",
+    "vigil.estimate_savings",
+    "vigil.feedback",
 }
 
 
@@ -89,7 +91,7 @@ def test_skill_set_matches_post_refactor_catalogue() -> None:
     served = _served_card()
     assert {s["id"] for s in served["skills"]} == EXPECTED_SKILL_IDS
     # Explicit count check guards against accidental drops on edits.
-    assert len(served["skills"]) == 14
+    assert len(served["skills"]) == 16
 
 
 def test_capabilities_disable_streaming_and_state_history() -> None:

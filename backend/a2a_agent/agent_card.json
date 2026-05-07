@@ -121,6 +121,18 @@
       "name": "Predict time-to-threshold-breach per vital",
       "description": "Forward-looking AI: linear-regression projection of each vital's trajectory from the recent observation window, with 95% CI per least-squares standard error. Returns time-to-breach for vitals already heading toward MEWT red thresholds (SBP<90, HR>110, RR>22, SpO2<93, Temp>38, Urine<30). Maps directly to the TREWS lead-time concept (Adams 2022, Nature Medicine — median 5.7h before threshold). The deterministic regression is the source of truth; LLM only narrates clinical significance of the nearest projected breach.",
       "tags": ["forecast", "predict", "trajectory", "lead-time", "regression", "trews"]
+    },
+    {
+      "id": "vigil.estimate_savings",
+      "name": "Estimate hypothetical 30-day cost savings",
+      "description": "Reads the autonomous-loop review queue and projects savings using published unit rates: $1,200 per delayed RRT (Bavarsad 2020), 18% mortality reduction with AI early sepsis detection (Adams 2022 TREWS), $12,200 per averted sepsis death (Paoli 2018). Hypothetical, synthetic-cohort-derived, not a clinical outcome claim — surfaces the operational signal a hospital purchaser asks for without overstating it.",
+      "tags": ["roi", "savings", "cost", "purchaser", "value"]
+    },
+    {
+      "id": "vigil.feedback",
+      "name": "Record clinician feedback on a verdict",
+      "description": "Closes the active-learning loop: clinician marks a prior Vigil verdict as helpful, false-positive, or other. Tagged feedback is logged to the metrics event store for future offline model-tuning review. Vigil does NOT retrain on chat-side feedback alone — closed-loop learning would require a proper MLOps pipeline. This skill is the labelled-example collection step.",
+      "tags": ["feedback", "active-learning", "tuning", "mlops", "closed-loop"]
     }
   ],
   "securitySchemes": {

@@ -38,6 +38,8 @@ class SkillId(StrEnum):
     READ_NURSING_SIGNALS = "vigil.read_nursing_signals"
     EXPLAIN = "vigil.explain"
     FORECAST_TRAJECTORY = "vigil.forecast_trajectory"
+    ESTIMATE_SAVINGS = "vigil.estimate_savings"
+    FEEDBACK = "vigil.feedback"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -101,6 +103,23 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
          "how long until", "time to breach", "lead time",
          "next hour", "extrapolate", "project the next"),
         SkillId.FORECAST_TRAJECTORY,
+    ),
+    # ROI / cost-of-avoided-RRT model — operational signal for the
+    # hospital purchaser. Multi-word phrases only.
+    (
+        ("estimate savings", "cost savings", "estimate roi", "compute roi",
+         "what's the roi", "whats the roi", "cost benefit",
+         "cost-benefit", "value estimate", "financial impact"),
+        SkillId.ESTIMATE_SAVINGS,
+    ),
+    # Active-learning feedback — clinician marks an alert as
+    # helpful / not-helpful / false-positive. Must precede the generic
+    # alert keywords.
+    (
+        ("was this helpful", "give feedback", "log feedback",
+         "thumbs up", "thumbs down", "false positive", "false-positive",
+         "not helpful", "this was useful", "this was wrong"),
+        SkillId.FEEDBACK,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
