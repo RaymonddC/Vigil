@@ -326,6 +326,29 @@ def get_latest_alert_at(patient_id: str) -> str | None:
     return str(row[0]) if row else None
 
 
+def list_alerts_for_patient(
+    patient_id: str, limit: int = 5
+) -> list[dict[str, Any]]:
+    """Return the *limit* most-recent alerts for a patient (any status).
+
+    Used by the A2A ``start_watching`` skill to render a per-patient
+    alert mini-timeline in chat. Includes superseded + completed alerts
+    so a clinician sees the full escalation arc, not just what's currently
+    pending.
+    """
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM alerts
+            WHERE patient_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (patient_id, int(limit)),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
