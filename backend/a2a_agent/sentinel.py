@@ -195,6 +195,10 @@ class PostopSentinelExecutor(AgentExecutor):
                 text = await self._handle_estimate_savings()
             elif skill is SkillId.FEEDBACK:
                 text = await self._handle_feedback(context.message)
+            elif skill is SkillId.SCREEN_PEDIATRIC:
+                text, data_source = await self._handle_screen_pediatric(
+                    sharp_headers, patient_id
+                )
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -2493,6 +2497,181 @@ class PostopSentinelExecutor(AgentExecutor):
             "figure that drives the mortality term.*",
         ]
         return "\n".join(sections) + _AUDIT_FOOTER_LIVE
+
+    async def _handle_screen_pediatric(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """PEWS — age-banded paediatric early-warning screen.
+
+        MEWT and qSOFA are adult-validated. Children have age-dependent
+        normal ranges (HR 110-160 in infants vs 60-110 in adolescents),
+        so the same vital signs that breach an adult threshold may be
+        completely normal for a child — and vice versa. PEWS handles
+        this with age-banded thresholds.
+
+        Implementation: fetch Patient.birthDate + recent vital-sign
+        Observations from FHIR via SHARP, compute age, run the PEWS
+        scorer (`backend/criteria/pews.py`), render the verdict with
+        per-parameter scores and a paediatric-specific recommended
+        action.
+
+        Reference: Monaghan 2005 Paediatric Nursing 17(1); Roland 2014
+        Arch Dis Child 99:26-29; RCPCH PEWS national chart 2023.
+        """
+        from datetime import UTC, datetime
+
+        from backend.criteria.pews import evaluate_pews
+        from backend.fhir.client import FhirClient, FhirClientError
+        from backend.schemas import FhirContext
+
+        ctx = FhirContext(
+            url=sharp_headers.get("x-fhir-server-url", ""),
+            token=sharp_headers.get("x-fhir-access-token"),
+            patient_id=sharp_headers.get("x-patient-id"),
+        )
+
+        try:
+            async with FhirClient(ctx) as fhir:
+                patient = await fhir.get_patient(patient_id)
+                observations = await fhir.get_observations(
+                    patient_id, category="vital-signs"
+                )
+        except FhirClientError as exc:
+            return (
+                f"I couldn't run a paediatric screen for `{patient_id}` "
+                f"because the FHIR server was unreachable: {exc}.",
+                "fhir",
+            )
+
+        # Compute age in years from birthDate.
+        age_years: float | None = None
+        try:
+            if patient and patient.birthDate:
+                bd = datetime.fromisoformat(str(patient.birthDate))
+                if bd.tzinfo is None:
+                    bd = bd.replace(tzinfo=UTC)
+                age_years = (datetime.now(UTC) - bd).days / 365.25
+        except (ValueError, AttributeError):
+            pass
+
+        if age_years is None:
+            return (
+                f"I couldn't run a paediatric screen for `{patient_id}` "
+                "because the Patient resource has no `birthDate`. "
+                "PEWS requires age to select the right band."
+                + _AUDIT_FOOTER_LIVE,
+                "fhir",
+            )
+
+        if age_years >= 18:
+            return (
+                f"### Paediatric screen — NOT APPLICABLE\n"
+                f"Patient is **{age_years:.1f} years old** (≥18). PEWS "
+                "covers ages 0-17; adults use MEWT/NEWS2/qSOFA. Run "
+                "`screen vitals` instead."
+                + _AUDIT_FOOTER_LIVE,
+                "fhir",
+            )
+
+        # Pull most-recent values for the 3 PEWS parameters.
+        latest: dict[str, tuple[datetime, float]] = {}
+        for obs in observations:
+            loinc = obs.loinc_code
+            val = (
+                obs.valueQuantity.value
+                if obs.valueQuantity and obs.valueQuantity.value is not None
+                else None
+            )
+            ts = obs.effectiveDateTime
+            if not loinc or val is None or not ts:
+                continue
+            existing = latest.get(loinc)
+            if existing is None or ts > existing[0]:
+                latest[loinc] = (ts, float(val))
+
+        hr = latest.get("8867-4", (None, None))[1]
+        rr = latest.get("9279-1", (None, None))[1]
+        spo2 = latest.get("59408-5", (None, None))[1]
+
+        result = evaluate_pews(age_years=age_years, hr=hr, rr=rr, spo2=spo2)
+
+        sections: list[str] = [
+            f"### Paediatric screen — **{('TRIGGERED' if result.triggered else 'CLEAR')}**"
+            f" *(per RCPCH PEWS / Monaghan 2005)*",
+            f"Patient age **{age_years:.1f}y** — band: **{result.age_band}**",
+        ]
+        # Per-parameter score breakdown.
+        score_lines: list[str] = []
+        if hr is not None:
+            score_lines.append(
+                f"- HR **{hr:.0f}** /min → score {result.hr_score}"
+            )
+        if rr is not None:
+            score_lines.append(
+                f"- RR **{rr:.0f}** /min → score {result.rr_score}"
+            )
+        if spo2 is not None:
+            score_lines.append(
+                f"- SpO2 **{spo2:.0f}** % → score {result.spo2_score}"
+            )
+        if score_lines:
+            sections.append("\n**Score breakdown:**")
+            sections.extend(score_lines)
+        sections.append(
+            f"\n**Aggregate: {result.aggregate}** "
+            + ("· **RED FLAG** (single-parameter ≥3)" if result.red_flag else "")
+        )
+
+        # Paediatric-specific action mapping. RCPCH 2023 chart uses
+        # similar response bands to NEWS2 but tunes the urgency to
+        # paediatric escalation pathways (consultant + paediatric
+        # rapid-response).
+        if result.red_flag or result.aggregate >= 5:
+            action = (
+                "**Action**: URGENT paediatric review by consultant or "
+                "paediatric rapid-response team within **15 min**. "
+                "Continuous monitoring; consider PICU consult."
+            )
+        elif result.aggregate >= 3:
+            action = (
+                "**Action**: Senior paediatric review within **1 hour**. "
+                "Hourly observations; reassess after each."
+            )
+        else:
+            action = (
+                "**Action**: Continue routine paediatric observation "
+                "schedule; reassess on next round."
+            )
+        sections.append(f"\n{action}")
+
+        # Confidence — driven by parameter completeness.
+        n_params = sum(1 for v in (hr, rr, spo2) if v is not None)
+        if n_params == 3:
+            sections.append(
+                _confidence("high", "all 3 PEWS parameters scored")
+            )
+        elif n_params == 2:
+            sections.append(
+                _confidence(
+                    "medium",
+                    f"{n_params}/3 parameters — refresh recommended",
+                )
+            )
+        else:
+            sections.append(
+                _confidence(
+                    "low",
+                    f"only {n_params}/3 parameters — partial score",
+                )
+            )
+
+        sections.append(f"\n*Rationale:* {result.rationale}")
+        return (
+            "\n".join(sections) + _AUDIT_FOOTER_LIVE,
+            "fhir",
+        )
 
     async def _handle_feedback(self, message: Any) -> str:
         """Record clinician feedback on a prior Vigil verdict.

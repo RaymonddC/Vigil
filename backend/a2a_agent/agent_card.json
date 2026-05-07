@@ -133,6 +133,12 @@
       "name": "Record clinician feedback on a verdict",
       "description": "Closes the active-learning loop: clinician marks a prior Vigil verdict as helpful, false-positive, or other. Tagged feedback is logged to the metrics event store for future offline model-tuning review. Vigil does NOT retrain on chat-side feedback alone — closed-loop learning would require a proper MLOps pipeline. This skill is the labelled-example collection step.",
       "tags": ["feedback", "active-learning", "tuning", "mlops", "closed-loop"]
+    },
+    {
+      "id": "vigil.screen_pediatric",
+      "name": "Paediatric early-warning screen (PEWS)",
+      "description": "Age-banded paediatric early-warning screen for patients aged 0-17. Uses RCPCH PEWS / Monaghan 2005 thresholds tuned per age band (infant, toddler, school-age, adolescent) so the same vital signs that breach an adult MEWT threshold may be normal for a child — and vice versa. Returns per-parameter score (HR, RR, SpO2), aggregate, single-parameter red-flag boolean, and paediatric-specific action mapping with PICU escalation.",
+      "tags": ["pediatric", "paediatric", "pews", "child", "rcpch", "monaghan", "age-banded"]
     }
   ],
   "securitySchemes": {

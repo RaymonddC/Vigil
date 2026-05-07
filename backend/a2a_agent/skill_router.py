@@ -40,6 +40,7 @@ class SkillId(StrEnum):
     FORECAST_TRAJECTORY = "vigil.forecast_trajectory"
     ESTIMATE_SAVINGS = "vigil.estimate_savings"
     FEEDBACK = "vigil.feedback"
+    SCREEN_PEDIATRIC = "vigil.screen_pediatric"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -120,6 +121,20 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
          "thumbs up", "thumbs down", "false positive", "false-positive",
          "not helpful", "this was useful", "this was wrong"),
         SkillId.FEEDBACK,
+    ),
+    # Pediatric early-warning — explicit pediatric phrasings only,
+    # ahead of the generic vitals/screen keywords. Routes to PEWS
+    # (age-banded thresholds) instead of MEWT (adult-only). Keep all
+    # tokens specific enough that they don't substring-match unrelated
+    # words: bare "kid" matched "kidney"; bare "child" stays in for
+    # plain phrasings since we expect ward-staff to use it directly.
+    (
+        ("pediatric", "paediatric", "pews", "screen pediatric",
+         "pediatric warning", "paediatric warning",
+         "child patient", "the child", "the infant", "the toddler",
+         "this child", "this infant", "this toddler",
+         "screen the child"),
+        SkillId.SCREEN_PEDIATRIC,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
