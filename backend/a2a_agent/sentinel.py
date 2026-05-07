@@ -177,6 +177,8 @@ class PostopSentinelExecutor(AgentExecutor):
                 )
             elif skill is SkillId.LIST_RECENT_ALERTS:
                 text = await self._handle_list_recent_alerts()
+            elif skill is SkillId.TICK_NOW:
+                text = await self._handle_tick_now()
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -986,6 +988,42 @@ class PostopSentinelExecutor(AgentExecutor):
             "patient."
         )
         return "\n".join(sections)
+
+    async def _handle_tick_now(self) -> str:
+        """Run one autonomous-loop cycle synchronously and return a summary.
+
+        Lets a clinician (or a hackathon judge) trigger the autonomous
+        tick on demand from PO chat instead of waiting up to
+        ``POLL_INTERVAL_SEC`` for the next scheduled cycle. The cycle
+        screens every patient in Vigil's HAPI cohort and enqueues alerts
+        in the SQLite review queue exactly the same way the background
+        loop would — so a follow-up ``list recent alerts`` returns the
+        populated queue immediately.
+        """
+        import os
+
+        from backend.a2a_agent.tick import run_cycle_for_all_patients
+
+        fhir_base = os.environ.get(
+            "FHIR_BASE_URL", "http://localhost:8080/fhir"
+        )
+        try:
+            summary = await run_cycle_for_all_patients(self._mcp, fhir_base)
+        except Exception as e:  # noqa: BLE001 — surface as friendly chat reply
+            logger.exception("tick_now cycle failed")
+            return (
+                f"I couldn't run a tick cycle: {e}. The autonomous loop's "
+                "FHIR connection or MCP tool layer is unavailable right now."
+            )
+
+        ticked = summary.get("patients_ticked", 0)
+        generated = summary.get("alerts_generated", 0)
+        return (
+            f"### Tick complete\n"
+            f"Screened **{ticked}** patient(s) on Vigil's HAPI cohort. "
+            f"**{generated}** new alert(s) enqueued in the review queue.\n\n"
+            "Ask `show recent alerts` to see what was flagged."
+        )
 
     # ---------------------------------------------------------------
     # Internal helpers

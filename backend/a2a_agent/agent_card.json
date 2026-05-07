@@ -97,6 +97,12 @@
       "name": "List recent autonomous-loop alerts",
       "description": "Reads Vigil's review queue — alerts surfaced by the autonomous monitoring loop ticking against the seeded postop cohort. Returns alerts grouped by severity (critical/urgent/routine), with patient id, narrative, and timestamp. Independent of the patient currently scoped in PO chat — use this for ward-wide situational awareness, screen_vitals/score_risk for the chat-scoped patient.",
       "tags": ["watch", "monitor", "alerts", "review-queue", "autonomous"]
+    },
+    {
+      "id": "vigil.tick_now",
+      "name": "Run autonomous monitoring cycle now",
+      "description": "Runs one autonomous-loop cycle synchronously across every patient in Vigil's HAPI cohort, instead of waiting up to POLL_INTERVAL_SEC for the next scheduled tick. Returns a summary of patients screened and alerts enqueued. Useful in demos and on-demand re-checks — a follow-up `list_recent_alerts` reflects the new state immediately.",
+      "tags": ["watch", "monitor", "tick", "autonomous", "demo"]
     }
   ],
   "securitySchemes": {

@@ -34,6 +34,7 @@ class SkillId(StrEnum):
     ASSESS_PPH = "vigil.assess_pph_severity"
     FLAG_TREATMENT_CONFLICTS = "vigil.flag_treatment_conflicts"
     LIST_RECENT_ALERTS = "vigil.list_recent_alerts"
+    TICK_NOW = "vigil.tick_now"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -53,6 +54,14 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
          "whats been flagged", "what has been flagged",
          "any patients flagged", "anyone flagged"),
         SkillId.LIST_RECENT_ALERTS,
+    ),
+    # Demo trigger — invoke the autonomous cycle synchronously so judges
+    # don't have to wait POLL_INTERVAL_SEC for the first tick. Multi-word
+    # phrases only so bare "tick" / "now" stay unmatched.
+    (
+        ("tick now", "run a tick", "run the loop", "trigger tick",
+         "force tick", "run cycle now", "run a cycle"),
+        SkillId.TICK_NOW,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
