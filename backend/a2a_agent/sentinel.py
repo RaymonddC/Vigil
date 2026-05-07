@@ -545,6 +545,52 @@ class PostopSentinelExecutor(AgentExecutor):
         if reversal_steps:
             sections.append("\n**To lower this risk** *(first-line per failing component):*")
             sections.extend(f"- {s}" for s in reversal_steps)
+
+        # Patient-context interpretation — LLM reads the deterministic
+        # output + comorbidities + active conditions and adds a 1-2
+        # sentence note about what this means *for this patient
+        # specifically* (e.g. "HR 110 is significant given baseline
+        # bradycardia from beta-blocker"). Rules can't do that.
+        # Skip when there's nothing patient-specific to interpret —
+        # qSOFA 0 with no comorbidities is just "low risk", no LLM
+        # needed.
+        if qsofa or comorbid:
+            from backend.llm.provider import LLMError, get_provider
+
+            firing = [
+                label for key, label in component_labels
+                if qsofa_components.get(key)
+            ]
+            ctx_prompt = (
+                "You are Vigil, a postop sentinel agent. Interpret the "
+                "deterioration risk for this specific patient in 1-2 "
+                "concise sentences, taking comorbidities and active "
+                "conditions into account. Focus on what's clinically "
+                "significant for THIS patient that a static threshold "
+                "wouldn't capture (e.g. baseline meds masking tachycardia, "
+                "comorbid CKD altering AKI staging interpretation, etc).\n\n"
+                f"Patient: {patient_id}\n"
+                f"Risk band: {band} (qSOFA {qsofa}/3, composite {composite_str})\n"
+                f"Firing qSOFA components: {firing or 'none'}\n"
+                f"Active conditions: {', '.join(comorbid) or 'none documented'}\n\n"
+                "Output: 1-2 sentences only. No bullets, no preamble, no "
+                "guideline citation (those are elsewhere). Plain prose. "
+                "Begin directly with clinical reasoning."
+            )
+            try:
+                interp = (
+                    await get_provider().complete(ctx_prompt, max_tokens=150)
+                ).strip()
+                if interp:
+                    sections.append(
+                        f"\n**Patient-specific context** *(LLM-interpreted):*\n{interp}"
+                    )
+            except LLMError as exc:
+                logger.debug(
+                    "score_risk LLM interpretation failed (non-fatal)",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+
         sections.append(f"\n*Rationale:* {rationale}")
         body = "\n".join(sections)
         return _with_disclosure(body, data), _data_source(data)
@@ -834,6 +880,77 @@ class PostopSentinelExecutor(AgentExecutor):
         ]
         if priming:
             sections.extend(["", f"**On arrival, expect:** {priming}"])
+
+        # Differential diagnosis — LLM reads the SBAR body + the three
+        # screen results and proposes a ranked differential the receiving
+        # clinician should consider. Rules can't generate a differential;
+        # this is squarely in the "AI you can't replace with case
+        # statements" category. Output is suggestion only; the SBAR
+        # recommendation section (rule-engine generated) remains the
+        # authoritative escalation guidance.
+        try:
+            from backend.llm.provider import LLMError, get_provider
+
+            screen_summary = json.dumps(
+                {
+                    "vitals": {
+                        "status": unwrapped_vitals.get("status"),
+                        "breaches": [
+                            {
+                                "label": b.get("label"),
+                                "value": b.get("value"),
+                                "severity": b.get("severity"),
+                            }
+                            for b in (unwrapped_vitals.get("breaches") or [])[:6]
+                        ],
+                    },
+                    "risk": {
+                        "band": unwrapped_risk.get("risk_band"),
+                        "qsofa": unwrapped_risk.get("qsofa_score"),
+                        "conditions": unwrapped_risk.get(
+                            "contributing_conditions"
+                        ) or [],
+                    },
+                    "sepsis": {
+                        "suspected": unwrapped_sepsis.get("sepsis_suspected"),
+                        "criteria_met": unwrapped_sepsis.get("criteria_met"),
+                    },
+                },
+                default=str,
+            )
+            diff_prompt = (
+                "You are Vigil, a postop and postpartum sentinel agent. "
+                "Given the deterministic screen results below, propose a "
+                "ranked clinical differential — the diagnoses the "
+                "receiving clinician should rule in or out at the "
+                "bedside. Use Bayesian framing: most likely first, "
+                "with one short clause per item explaining why these "
+                "findings support it.\n\n"
+                f"Patient: {patient_id}\n"
+                f"Screen results: {screen_summary}\n\n"
+                "Output rules:\n"
+                "- 3-5 markdown bullets, ordered most likely first.\n"
+                "- Format: `- **Diagnosis** — short rationale citing the "
+                "specific finding (e.g. 'lactate 2.8 + Tmax 38.6').`\n"
+                "- Do NOT invent findings not present in the screen.\n"
+                "- Do NOT output any introduction or conclusion."
+            )
+            differential = (
+                await get_provider().complete(diff_prompt, max_tokens=300)
+            ).strip()
+            if differential:
+                sections.extend([
+                    "",
+                    "**Differential to consider** *(LLM-ranked, not "
+                    "deterministic — verify at bedside):*",
+                    differential,
+                ])
+        except LLMError as exc:
+            logger.debug(
+                "draft_sbar differential failed (non-fatal)",
+                extra={"patient_id": patient_id, "error": str(exc)},
+            )
+
         body = "\n".join(sections)
         if data_source == SYNTHETIC_DATA_SOURCE:
             body = f"{synthetic_disclosure(patient_id)}\n\n{body}"
