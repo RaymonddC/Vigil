@@ -21,7 +21,12 @@ from backend.mcp_server.synthetic_fallback import (
     is_fallback_enabled,
 )
 from backend.obs.metrics import tool_call_timer
-from backend.schemas import FhirContext, ScreenVitalsOutput, ToolStatus
+from backend.schemas import (
+    FhirContext,
+    ScreenVitalsOutput,
+    ToolStatus,
+    VitalSample,
+)
 
 logger = logging.getLogger("vigil.mcp.tools.screen_vital_thresholds")
 
@@ -110,6 +115,24 @@ async def run(
         vitals = _obs_to_readings(observations)
         result = evaluate_mewt(vitals, trajectory)
 
+        # Group by LOINC, sort by timestamp ascending — the chat layer
+        # uses the last 2-3 entries per LOINC to render trend direction.
+        # Skip the synthetic "TREND" loinc the rule engine emits for
+        # the hemodynamic-trend rule; that's a flag, not a reading.
+        history: dict[str, list[VitalSample]] = {}
+        for reading in vitals:
+            if reading.loinc == "TREND":
+                continue
+            history.setdefault(reading.loinc, []).append(
+                VitalSample(
+                    value=reading.value,
+                    unit=reading.unit,
+                    observed_at=reading.timestamp,
+                )
+            )
+        for loinc in history:
+            history[loinc].sort(key=lambda s: s.observed_at)
+
         status = ToolStatus.TRIGGERED if result.triggered else ToolStatus.OK
         ctx["status"] = status
 
@@ -133,5 +156,6 @@ async def run(
             window_start=window_start,
             window_end=now,
             data_source=data_source,
+            vitals_history=history,
         )
         return output.model_dump_json()

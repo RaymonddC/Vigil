@@ -308,13 +308,43 @@ class PostopSentinelExecutor(AgentExecutor):
         red_breaches = [b for b in breaches if b.get("severity") == "red"]
         yellow_breaches = [b for b in breaches if b.get("severity") == "yellow"]
 
+        # Trend arrows per breached vital — clinicians read direction
+        # before number. Compute from vitals_history (LOINC → samples,
+        # oldest first) shipped by the MCP tool. Fall back silently if
+        # history is missing (older tool version) or has fewer than 2
+        # samples for that LOINC.
+        history = data.get("vitals_history") or {}
+
+        def _trend(loinc: str, latest: float | int | str) -> str:
+            samples = history.get(loinc) or []
+            if len(samples) < 2:
+                return ""
+            try:
+                prev = float(samples[-2].get("value"))
+                curr = float(latest) if not isinstance(latest, str) else float(latest)
+            except (TypeError, ValueError):
+                return ""
+            if prev <= 0:
+                return ""
+            pct = ((curr - prev) / abs(prev)) * 100
+            # 5% deadband — clinically meaningful threshold for
+            # most postop vitals at hourly cadence; below this is
+            # visit-to-visit noise.
+            if pct >= 5:
+                return f" ↑ ({pct:+.0f}% vs prior)"
+            if pct <= -5:
+                return f" ↓ ({pct:+.0f}% vs prior)"
+            return " ↔ (stable vs prior)"
+
         def _line(b: dict) -> str:
             label = b.get("label", "?")
             value = b.get("value", "?")
             unit = (b.get("unit", "") or "").strip()
             thr = _humanize(b.get("threshold", ""))
+            loinc = b.get("loinc", "")
             tail = f" {unit}" if unit else ""
-            return f"- **{label}** {value}{tail} (threshold {thr})"
+            trend = _trend(loinc, value) if loinc else ""
+            return f"- **{label}** {value}{tail}{trend} (threshold {thr})"
 
         # Recommended action — derived from severity per NEWS2 RCP-2017
         # response framework, adapted to MEWT's binary red/yellow scheme.

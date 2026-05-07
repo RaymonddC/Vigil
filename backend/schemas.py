@@ -235,6 +235,39 @@ class ScreenVitalsOutput(BaseModel):
     window_start: datetime
     window_end: datetime
     data_source: Literal["fhir", "synthetic_demo"] = "fhir"
+    # Per-LOINC observation history, sorted oldest → newest. Lets the
+    # chat layer compute trend direction (↑/↓/↔) for each breached
+    # vital — clinicians scan direction-of-travel before the absolute
+    # number when triaging postop deterioration.
+    vitals_history: dict[str, list[VitalSample]] = Field(
+        default_factory=dict
+    )
+
+
+class VitalSample(BaseModel):
+    """One vital-sign reading as returned in ``ScreenVitalsOutput.vitals_history``.
+
+    Slimmer than ``VitalBreach`` because it carries no severity / threshold
+    metadata — just enough to compute trend direction and render in the
+    chat handler.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "value": 88.0,
+                    "unit": "mm[Hg]",
+                    "observed_at": "2026-04-15T11:48:00Z",
+                }
+            ]
+        },
+    )
+
+    value: float
+    unit: str
+    observed_at: datetime
 
 
 # ---------------------------------------------------------------------------
