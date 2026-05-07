@@ -336,6 +336,31 @@ class PostopSentinelExecutor(AgentExecutor):
                 return f" ↓ ({pct:+.0f}% vs prior)"
             return " ↔ (stable vs prior)"
 
+        def _baseline(loinc: str, latest: float | int | str) -> str:
+            """Earliest sample in the fetched window as a pseudo-baseline.
+
+            True pre-op baseline would need a separate FHIR query against
+            the procedure-anchored window; this is the cheap approximation
+            that lights up "% drift since first observation we have"
+            without a tool change. Honest framing in the chat label.
+            """
+            samples = history.get(loinc) or []
+            if len(samples) < 3:
+                return ""
+            try:
+                first = float(samples[0].get("value"))
+                curr = float(latest) if not isinstance(latest, str) else float(latest)
+            except (TypeError, ValueError):
+                return ""
+            if first <= 0:
+                return ""
+            pct = ((curr - first) / abs(first)) * 100
+            if abs(pct) < 5:
+                return ""
+            unit = (samples[0].get("unit") or "").strip()
+            unit_tail = f" {unit}" if unit else ""
+            return f" — first reading {first:g}{unit_tail} ({pct:+.0f}%)"
+
         def _line(b: dict) -> str:
             label = b.get("label", "?")
             value = b.get("value", "?")
@@ -344,7 +369,8 @@ class PostopSentinelExecutor(AgentExecutor):
             loinc = b.get("loinc", "")
             tail = f" {unit}" if unit else ""
             trend = _trend(loinc, value) if loinc else ""
-            return f"- **{label}** {value}{tail}{trend} (threshold {thr})"
+            base = _baseline(loinc, value) if loinc else ""
+            return f"- **{label}** {value}{tail}{trend} (threshold {thr}){base}"
 
         # Recommended action — derived from severity per NEWS2 RCP-2017
         # response framework, adapted to MEWT's binary red/yellow scheme.
@@ -839,6 +865,8 @@ class PostopSentinelExecutor(AgentExecutor):
         baseline = data.get("creatinine_baseline")
         baseline_imputed = bool(data.get("baseline_imputed"))
         baseline_source = data.get("baseline_source") or "unknown source"
+        urine = data.get("urine_output_ml_kg_h")
+        oliguria_hr = data.get("oliguria_hours")
         ttf = data.get("time_to_intervention_hours")
         rationale = data.get("rationale") or "no rationale provided"
 
@@ -875,10 +903,20 @@ class PostopSentinelExecutor(AgentExecutor):
         else:
             ttf_text = f"Intervention within **{ttf}h** (SCCM 2017)."
 
+        # Urine output line — KDIGO 2012 staging uses both creatinine
+        # AND urine output, so surface the urine reading whenever the
+        # tool returns it. Oliguria duration cues fluid-balance review.
+        urine_line = ""
+        if isinstance(urine, (int, float)):
+            urine_line = f" · **Urine** {urine:.2f} mL/kg/h"
+            if isinstance(oliguria_hr, (int, float)) and oliguria_hr > 0:
+                urine_line += f" (oliguria {oliguria_hr:.0f}h)"
+
         sections = [
             f"### AKI — **{stage_badge}** *(per KDIGO 2012)*",
             f"**SCr** {creat_str} mg/dL · **baseline** {baseline_str} mg/dL"
-            + delta_str,
+            + delta_str
+            + urine_line,
         ]
         if baseline_imputed:
             sections.append(
