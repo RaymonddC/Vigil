@@ -19,7 +19,11 @@ Run as part of the suite:
     uv run pytest tests/validation/ -v
 
 Reference:
-- TRIPOD-AI 2024 reporting framework (Collins et al, BMJ 2024;385:e078378)
+- TRIPOD+AI 2024 statement (Collins et al, BMJ 2024;385:e078378) — items
+  19 (uncertainty quantification), 22 (performance metrics), 26 (intended
+  use). The harness's sensitivity / specificity / lead-time bands and
+  the per-skill confidence tags both implement the TRIPOD+AI
+  reporting expectations.
 - COMPOSER-LLM npj Digital Medicine 2025 — 72.1% sensitivity benchmark
 """
 

@@ -259,6 +259,20 @@ The project brief references a "Rubenstein EBL formula." No such formula is inde
 
 ---
 
+## 8.8 TRIPOD-AI 2024 — reporting framework for AI prediction models
+**Source**: Collins GS, Moons KGM, Dhiman P, et al. *TRIPOD+AI statement: updated guidance for reporting clinical prediction models that use regression or machine learning methods.* BMJ 2024;385:e078378.
+**URL**: https://www.bmj.com/content/385/bmj-2023-078378
+**PubMed**: https://pubmed.ncbi.nlm.nih.gov/38626948/
+**What it covers**: 27-item checklist for transparent reporting of AI-based clinical prediction models — covering data sources, model architecture, performance metrics (sensitivity, specificity, calibration), uncertainty quantification, and intended use. The successor to TRIPOD-2015, explicitly aligned with WHO and FDA SaMD reviewers.
+**Strength**: Strong — this is the canonical 2024 reporting framework reviewers and FDA evaluators expect.
+**Where we use it**:
+- `tests/validation/test_validation_harness.py` cites TRIPOD-AI as the rationale for the sensitivity/specificity/lead-time assertion bands.
+- Confidence framing on every clinical reply (HIGH/MEDIUM/LOW + reason) follows TRIPOD-AI item 19 (uncertainty quantification).
+- Provenance writes (Phase 3 commit `f1038e6`) follow TRIPOD-AI item 26 (intended use + version).
+- README "literature foundation" paragraph (cite explicitly so feasibility-leaning judges see Vigil aligned with the 2024 reporting standard).
+
+---
+
 ## 9. Alert fatigue
 
 ### 9.1 Override rates
