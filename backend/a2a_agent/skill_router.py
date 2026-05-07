@@ -37,6 +37,7 @@ class SkillId(StrEnum):
     TICK_NOW = "vigil.tick_now"
     READ_NURSING_SIGNALS = "vigil.read_nursing_signals"
     EXPLAIN = "vigil.explain"
+    FORECAST_TRAJECTORY = "vigil.forecast_trajectory"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -89,6 +90,17 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
          "could this be", "is it possible", "what about",
          "follow up question", "follow-up question", "tell me more"),
         SkillId.EXPLAIN,
+    ),
+    # Predictive trajectory forecasting — forward-looking AI that
+    # projects time-to-threshold-breach from the recent vitals slope.
+    # Must come BEFORE generic vitals/screen keywords so phrases like
+    # "when will this trip" / "predict the next hour" route here, not
+    # to the point-in-time threshold screen.
+    (
+        ("forecast", "predict", "trajectory", "when will",
+         "how long until", "time to breach", "lead time",
+         "next hour", "extrapolate", "project the next"),
+        SkillId.FORECAST_TRAJECTORY,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic

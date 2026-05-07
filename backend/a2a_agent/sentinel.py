@@ -187,6 +187,10 @@ class PostopSentinelExecutor(AgentExecutor):
                 text = await self._handle_explain(
                     sharp_headers, patient_id, context.message
                 )
+            elif skill is SkillId.FORECAST_TRAJECTORY:
+                text, data_source = await self._handle_forecast_trajectory(
+                    sharp_headers, patient_id
+                )
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -1935,6 +1939,336 @@ class PostopSentinelExecutor(AgentExecutor):
             f"{answer}"
             + _AUDIT_FOOTER_LIVE
         )
+
+    async def _handle_forecast_trajectory(
+        self,
+        sharp_headers: dict[str, str],
+        patient_id: str,
+    ) -> tuple[str, str]:
+        """Predictive trajectory forecasting — when does each vital cross
+        its MEWT threshold, given the current slope?
+
+        This is forward-looking AI: rather than reporting which thresholds
+        are tripped right now (`screen_vitals`) or what the trend
+        *direction* is (`score_risk`), this skill *projects* the linear
+        slope forward and estimates **time-to-breach** with a 95%
+        confidence band per least-squares regression. Maps directly to
+        the TREWS lead-time concept (Adams 2022, Nature Medicine —
+        median 5.7h before threshold).
+
+        We piggyback on `screen_vital_thresholds`'s ``vitals_history``
+        rather than fetching FHIR again. Vitals with <3 samples are
+        skipped (regression undefined). The LLM only narrates clinical
+        significance once the math is locked in — the deterministic
+        slope and confidence interval are the source of truth, not
+        the prose.
+        """
+        import math
+
+        try:
+            raw = await self._mcp.call_tool(
+                "screen_vital_thresholds",
+                arguments={"patient_id": patient_id},
+                sharp_headers=sharp_headers,
+            )
+        except McpClientError as e:
+            return (
+                f"I couldn't forecast the trajectory for `{patient_id}` "
+                f"because the MCP tool was unreachable: {e}.",
+                "fhir",
+            )
+
+        data = _unwrap_tool_result(raw)
+        err = _tool_error_text(data, patient_id, action="forecast trajectory")
+        if err is not None:
+            return err, _data_source(data)
+
+        history = data.get("vitals_history") or {}
+        if not history:
+            return (
+                "I couldn't forecast the trajectory because no vital-sign "
+                "history is available — need ≥3 readings per vital for a "
+                "regression."
+                + _AUDIT_FOOTER_LIVE,
+                _data_source(data),
+            )
+
+        # MEWT-aligned forecast targets per LOINC. Each (loinc, label,
+        # direction, threshold) tuple says what we're projecting toward.
+        # Direction: 'down' = vital trends below threshold = bad;
+        # 'up' = trends above threshold = bad. Mirrors the rule
+        # engine's red breach definitions in backend/criteria/mewt.py.
+        forecast_targets: list[tuple[str, str, str, float, str]] = [
+            ("8480-6", "SBP", "down", 90.0, "mm[Hg]"),
+            ("8867-4", "HR", "up", 110.0, "/min"),
+            ("9279-1", "RR", "up", 22.0, "/min"),
+            ("59408-5", "SpO2", "down", 93.0, "%"),
+            ("8310-5", "Temp", "up", 38.0, "°C"),
+            ("9192-6", "Urine", "down", 30.0, "mL/h"),
+        ]
+
+        # Pure-Python OLS — no scipy/numpy dep. Returns slope, intercept,
+        # R², standard error of the slope. Times are minutes since the
+        # earliest sample so units are stable per vital.
+        def _regress(samples: list[dict]) -> dict[str, float] | None:
+            if len(samples) < 3:
+                return None
+            try:
+                from datetime import datetime as _dt
+                t0_str = samples[0].get("observed_at") or ""
+                t0 = _dt.fromisoformat(str(t0_str).replace("Z", "+00:00"))
+                xs: list[float] = []
+                ys: list[float] = []
+                for s in samples:
+                    ts_str = s.get("observed_at") or ""
+                    ti = _dt.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                    xs.append((ti - t0).total_seconds() / 60.0)
+                    ys.append(float(s.get("value")))
+            except (TypeError, ValueError):
+                return None
+            n = len(xs)
+            mean_x = sum(xs) / n
+            mean_y = sum(ys) / n
+            ss_xy = sum((xs[i] - mean_x) * (ys[i] - mean_y) for i in range(n))
+            ss_xx = sum((xs[i] - mean_x) ** 2 for i in range(n))
+            if ss_xx == 0:
+                return None
+            slope = ss_xy / ss_xx
+            intercept = mean_y - slope * mean_x
+            ss_yy = sum((ys[i] - mean_y) ** 2 for i in range(n))
+            r_sq = (ss_xy * ss_xy) / (ss_xx * ss_yy) if ss_yy > 0 else 0.0
+            # Residual standard error → SE of slope (n-2 dof).
+            if n > 2:
+                resids = [ys[i] - (slope * xs[i] + intercept) for i in range(n)]
+                rss = sum(r * r for r in resids)
+                se_slope = math.sqrt(rss / (n - 2) / ss_xx) if ss_xx > 0 else 0.0
+            else:
+                se_slope = 0.0
+            latest_t = xs[-1]
+            latest_y = ys[-1]
+            return {
+                "slope": slope,
+                "intercept": intercept,
+                "r_squared": r_sq,
+                "se_slope": se_slope,
+                "latest_t": latest_t,
+                "latest_y": latest_y,
+                "n": float(n),
+            }
+
+        forecasts: list[dict[str, Any]] = []
+        for loinc, label, direction, thr, unit in forecast_targets:
+            samples = history.get(loinc) or []
+            reg = _regress(samples)
+            if reg is None:
+                continue
+            slope = reg["slope"]
+            latest_y = reg["latest_y"]
+            n = int(reg["n"])
+
+            # Time to breach the threshold from the LATEST reading,
+            # not the regression intercept (more honest in chat).
+            # If slope direction agrees with deterioration direction,
+            # compute t_remaining; otherwise mark "stable / improving".
+            already_breached = (
+                (direction == "down" and latest_y <= thr)
+                or (direction == "up" and latest_y >= thr)
+            )
+            if already_breached:
+                forecasts.append({
+                    "label": label,
+                    "latest": latest_y,
+                    "unit": unit,
+                    "slope_per_h": slope * 60.0,
+                    "threshold": thr,
+                    "direction": direction,
+                    "status": "already_breached",
+                    "t_to_breach_min": 0.0,
+                    "ci_low_min": 0.0,
+                    "ci_high_min": 0.0,
+                    "r_squared": reg["r_squared"],
+                    "n": n,
+                })
+                continue
+
+            heading_bad = (
+                (direction == "down" and slope < 0)
+                or (direction == "up" and slope > 0)
+            )
+            if not heading_bad or abs(slope) < 1e-6:
+                forecasts.append({
+                    "label": label,
+                    "latest": latest_y,
+                    "unit": unit,
+                    "slope_per_h": slope * 60.0,
+                    "threshold": thr,
+                    "direction": direction,
+                    "status": "stable_or_improving",
+                    "t_to_breach_min": None,
+                    "ci_low_min": None,
+                    "ci_high_min": None,
+                    "r_squared": reg["r_squared"],
+                    "n": n,
+                })
+                continue
+
+            t_to_breach = (thr - latest_y) / slope  # minutes
+            # 95% CI on the slope translates to a CI on time-to-breach
+            # via the inverse map. Use ~1.96 × SE for the slope band;
+            # n-2 t-quantile would be tighter but ±1.96 is the
+            # clinically familiar 95% framing.
+            slope_low = slope - 1.96 * reg["se_slope"]
+            slope_high = slope + 1.96 * reg["se_slope"]
+
+            def _t(s: float, _thr: float = thr, _y: float = latest_y) -> float | None:
+                if s == 0:
+                    return None
+                t = (_thr - _y) / s
+                return t if t >= 0 else None
+
+            ci_a = _t(slope_low)
+            ci_b = _t(slope_high)
+            cis = [t for t in (ci_a, ci_b) if t is not None]
+            ci_low = min(cis) if cis else t_to_breach
+            ci_high = max(cis) if cis else t_to_breach
+
+            forecasts.append({
+                "label": label,
+                "latest": latest_y,
+                "unit": unit,
+                "slope_per_h": slope * 60.0,
+                "threshold": thr,
+                "direction": direction,
+                "status": "projected_breach",
+                "t_to_breach_min": t_to_breach,
+                "ci_low_min": ci_low,
+                "ci_high_min": ci_high,
+                "r_squared": reg["r_squared"],
+                "n": n,
+            })
+
+        if not forecasts:
+            return (
+                "### Trajectory forecast — insufficient data\n"
+                "Need ≥3 samples per vital for a regression. The current "
+                "observation window doesn't have that for the deterioration-"
+                "relevant vitals (SBP, HR, RR, SpO2, Temp, Urine)."
+                + _AUDIT_FOOTER_LIVE,
+                _data_source(data),
+            )
+
+        # Sort: already-breached first, then nearest projected breach,
+        # then stable/improving.
+        def _sort_key(f: dict) -> tuple[int, float]:
+            if f["status"] == "already_breached":
+                return (0, 0.0)
+            if f["status"] == "projected_breach":
+                return (1, f["t_to_breach_min"] or float("inf"))
+            return (2, float("inf"))
+        forecasts.sort(key=_sort_key)
+
+        def _fmt_min(m: float | None) -> str:
+            if m is None:
+                return "n/a"
+            if m < 60:
+                return f"{m:.0f} min"
+            return f"{m / 60:.1f} h"
+
+        sections: list[str] = [
+            "### Trajectory forecast",
+            "Linear-regression projection per vital from the most-recent "
+            "observation window. **Forward-looking — these are AI "
+            "projections, not measurements.** Time-to-breach is the "
+            "minutes from the latest reading until each vital crosses "
+            "its MEWT red threshold at the current slope, with 95% CI "
+            "from the regression standard error.",
+            "",
+        ]
+
+        breached = [f for f in forecasts if f["status"] == "already_breached"]
+        projected = [f for f in forecasts if f["status"] == "projected_breach"]
+        stable = [f for f in forecasts if f["status"] == "stable_or_improving"]
+
+        if breached:
+            sections.append("**Already breached:**")
+            for f in breached:
+                op = "≤" if f["direction"] == "down" else "≥"
+                sections.append(
+                    f"- **{f['label']}** {f['latest']:.1f} {f['unit']} "
+                    f"(threshold {op} {f['threshold']:g})"
+                )
+            sections.append("")
+
+        if projected:
+            sections.append("**Projected to breach (sorted soonest first):**")
+            for f in projected:
+                sections.append(
+                    f"- **{f['label']}** {f['latest']:.1f} {f['unit']} → "
+                    f"crosses {f['threshold']:g} in **"
+                    f"{_fmt_min(f['t_to_breach_min'])}** "
+                    f"(95% CI: {_fmt_min(f['ci_low_min'])}"
+                    f"–{_fmt_min(f['ci_high_min'])}; "
+                    f"slope {f['slope_per_h']:+.2f}/h, "
+                    f"R²={f['r_squared']:.2f}, n={f['n']})"
+                )
+            sections.append("")
+
+        if stable:
+            sections.append("**Stable or improving:**")
+            for f in stable:
+                sections.append(
+                    f"- {f['label']} {f['latest']:.1f} {f['unit']} "
+                    f"(slope {f['slope_per_h']:+.2f}/h)"
+                )
+            sections.append("")
+
+        # LLM narration — clinically significant interpretation of the
+        # nearest projected breach, in 2-3 sentences. Skipped if there
+        # are no projected breaches (no clinical urgency to interpret).
+        if projected:
+            try:
+                from backend.llm.provider import LLMError, get_provider
+                head = projected[0]
+                prompt = (
+                    "You are Vigil, a postop sentinel agent. The "
+                    "deterministic trajectory forecast below is the "
+                    "ground truth — interpret it clinically in 2-3 "
+                    "sentences. Reference the named guideline (NEWS2 "
+                    "RCP-2017, qSOFA Sepsis-3) only if relevant. Do "
+                    "NOT invent figures.\n\n"
+                    f"Patient: {patient_id}\n"
+                    f"Nearest projected breach: {head['label']} "
+                    f"crosses {head['threshold']} {head['unit']} in "
+                    f"~{_fmt_min(head['t_to_breach_min'])} "
+                    f"(latest {head['latest']:.1f}, "
+                    f"slope {head['slope_per_h']:+.2f}/h, "
+                    f"R² {head['r_squared']:.2f}).\n\n"
+                    "Output: 2-3 sentences only. No bullets, no "
+                    "preamble, plain prose."
+                )
+                interp = (
+                    await get_provider().complete(prompt, max_tokens=180)
+                ).strip()
+                if interp:
+                    sections.extend([
+                        "**Clinical interpretation** *(LLM-narrated):*",
+                        interp,
+                        "",
+                    ])
+            except LLMError as exc:
+                logger.debug(
+                    "forecast LLM narration failed (non-fatal)",
+                    extra={"patient_id": patient_id, "error": str(exc)},
+                )
+
+        sections.append(
+            "*Forward projection assumes the current slope holds. "
+            "Maps to the TREWS lead-time concept (Adams 2022, Nature "
+            "Medicine — median 5.7h before threshold). Refresh by "
+            "running this skill again after the next vital reading.*"
+        )
+        body = "\n".join(sections).rstrip() + _AUDIT_FOOTER_LIVE
+        return body, _data_source(data)
 
     # ---------------------------------------------------------------
     # Internal helpers

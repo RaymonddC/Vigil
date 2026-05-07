@@ -115,6 +115,12 @@
       "name": "Answer a clinician follow-up question",
       "description": "Conversational follow-up on a prior Vigil reply. Takes a free-text clinician question ('why did you escalate?', 'could it be the antibiotic instead?', 'what about dehydration?') and answers in 3-5 sentences with cited guideline anchors. Suggests the right Vigil skill if the question needs fresh data. Never makes an escalation decision — only explains, suggests, or chains. Preserves the HITL invariant.",
       "tags": ["explain", "follow-up", "consult", "conversational"]
+    },
+    {
+      "id": "vigil.forecast_trajectory",
+      "name": "Predict time-to-threshold-breach per vital",
+      "description": "Forward-looking AI: linear-regression projection of each vital's trajectory from the recent observation window, with 95% CI per least-squares standard error. Returns time-to-breach for vitals already heading toward MEWT red thresholds (SBP<90, HR>110, RR>22, SpO2<93, Temp>38, Urine<30). Maps directly to the TREWS lead-time concept (Adams 2022, Nature Medicine — median 5.7h before threshold). The deterministic regression is the source of truth; LLM only narrates clinical significance of the nearest projected breach.",
+      "tags": ["forecast", "predict", "trajectory", "lead-time", "regression", "trews"]
     }
   ],
   "securitySchemes": {
