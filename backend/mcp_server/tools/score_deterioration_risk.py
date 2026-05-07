@@ -199,10 +199,21 @@ async def run(
         status = ToolStatus.OK if band == "low" else ToolStatus.TRIGGERED
         ctx["status"] = status
 
-        # Rationale
+        # Rationale — separate validated threshold breaches from the
+        # operational-not-validated hemodynamic trend rule (CLAUDE.md
+        # invariant). Surfacing the distinction lets clinicians weight
+        # trend-only triggers appropriately and keeps the caveat visible
+        # in Prompt Opinion's chat reply rather than buried in code.
+        trend_breaches = sum(1 for b in mewt.breaches if b.loinc == "TREND")
+        threshold_breaches = mewt.score - trend_breaches
         parts = [qsofa.rationale]
-        if mewt.triggered:
-            parts.append(f"MEWT: {mewt.score} breach(es)")
+        if threshold_breaches > 0:
+            parts.append(f"MEWT: {threshold_breaches} threshold breach(es)")
+        if trend_breaches > 0:
+            parts.append(
+                f"{trend_breaches} hemodynamic trend rule fired "
+                "(Vigil operational, not externally validated)"
+            )
         if active_conditions:
             parts.append(f"{len(active_conditions)} active condition(s)")
         rationale = "; ".join(parts)

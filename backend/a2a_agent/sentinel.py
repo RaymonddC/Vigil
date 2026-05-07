@@ -763,19 +763,63 @@ class PostopSentinelExecutor(AgentExecutor):
         sharp_headers: dict[str, str],
         patient_id: str,
     ) -> str:
-        """Acknowledge — autonomous loop is started by app.py via env var.
+        """Report the current watch status for ``patient_id``.
 
-        This skill is informational/stub for the demo; programmatic loop
-        control is post-MVP. Returning a chat-friendly explanation lets
-        the launchpad surface the right answer rather than 404-ing.
+        Programmatic per-patient enable/disable is post-MVP — the autonomous
+        loop is configured deployment-wide via ``POLL_INTERVAL_SEC``. But the
+        skill is more useful as a live status reporter than as a stub: it
+        surfaces whether watching is on, what the cadence is, and what's
+        already been flagged for this patient in the review queue.
         """
+        import os
+
+        from backend.api.review_queue import (
+            count_superseded_alerts,
+            count_unread_alerts,
+            get_latest_alert_at,
+        )
+
+        try:
+            interval_sec = int(os.environ.get("POLL_INTERVAL_SEC", "900"))
+        except ValueError:
+            interval_sec = 0
+
+        try:
+            pending = count_unread_alerts(patient_id)
+            superseded = count_superseded_alerts(patient_id)
+            last_seen = get_latest_alert_at(patient_id)
+        except Exception:  # noqa: BLE001 — review queue is best-effort here
+            logger.exception("review queue read failed in start_watching")
+            pending, superseded, last_seen = 0, 0, None
+
+        if interval_sec > 0:
+            cadence = (
+                f"Vigil is actively watching every {interval_sec}s "
+                f"(deployment-wide cadence)."
+            )
+        else:
+            cadence = (
+                "Vigil's autonomous loop is currently disabled "
+                "(`POLL_INTERVAL_SEC=0`); skills run on-demand only."
+            )
+
+        history_bits: list[str] = []
+        if pending:
+            history_bits.append(f"{pending} pending alert(s) in the review queue")
+        if superseded:
+            history_bits.append(f"{superseded} superseded alert(s)")
+        if last_seen:
+            history_bits.append(f"last alert at {last_seen}")
+        history = (
+            "Patient history: " + "; ".join(history_bits) + "."
+            if history_bits
+            else f"No alerts have been raised for `{patient_id}` yet."
+        )
+
         return (
-            f"Vigil's autonomous polling loop is configured at the "
-            f"deployment level via the `POLL_INTERVAL_SEC` env var "
-            f"(set to `0` in Option 3 to disable). To enable continuous "
-            f"monitoring of `{patient_id}`, set a positive interval and "
-            f"restart the agent service. Programmatic per-patient control "
-            "is post-MVP."
+            f"{cadence} {history} "
+            "Programmatic per-patient enable/disable is post-MVP — to change "
+            "cadence, update `POLL_INTERVAL_SEC` and restart the agent service."
         )
 
     # ---------------------------------------------------------------

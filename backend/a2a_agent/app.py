@@ -51,7 +51,7 @@ FHIR_BASE_URL = os.environ.get("FHIR_BASE_URL", "http://localhost:8080/fhir")
 # ---------------------------------------------------------------------------
 
 _card_path = Path(__file__).parent / "agent_card.json"
-_card_data = json.loads(_card_path.read_text())
+_card_data = json.loads(_card_path.read_text(encoding="utf-8"))
 
 # Override URL from env if deploying publicly. A2A v1 has both the legacy
 # top-level `url` (still required by the installed v0.3 SDK) and the canonical
