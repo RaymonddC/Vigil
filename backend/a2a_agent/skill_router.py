@@ -33,6 +33,7 @@ class SkillId(StrEnum):
     SCORE_NEWS2 = "vigil.score_news2"
     ASSESS_PPH = "vigil.assess_pph_severity"
     FLAG_TREATMENT_CONFLICTS = "vigil.flag_treatment_conflicts"
+    LIST_RECENT_ALERTS = "vigil.list_recent_alerts"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -41,6 +42,18 @@ class SkillId(StrEnum):
 # Order matters! More-specific tokens must come first, otherwise the
 # generic ``score``/``risk`` keywords would steal NEWS2 and PPH prompts.
 _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
+    # Background-loop alert query — must come BEFORE single-skill keywords
+    # so phrases like "show recent alerts" / "list watched patients" don't
+    # leak into screen_vitals or check_sepsis. Multi-word phrases only;
+    # bare "alert" stays unmatched so "any sepsis alert?" still routes
+    # to CHECK_SEPSIS via its own keywords.
+    (
+        ("recent alerts", "list alerts", "show alerts", "pending alerts",
+         "background alerts", "watched patients", "what's been flagged",
+         "whats been flagged", "what has been flagged",
+         "any patients flagged", "anyone flagged"),
+        SkillId.LIST_RECENT_ALERTS,
+    ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
     # ``risk``/``score`` family, because prompts like "is it safe to

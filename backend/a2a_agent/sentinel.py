@@ -175,6 +175,8 @@ class PostopSentinelExecutor(AgentExecutor):
                 text = await self._handle_start_watching(
                     sharp_headers, patient_id
                 )
+            elif skill is SkillId.LIST_RECENT_ALERTS:
+                text = await self._handle_list_recent_alerts()
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -896,6 +898,94 @@ class PostopSentinelExecutor(AgentExecutor):
             "Programmatic per-patient enable/disable is post-MVP — to change "
             "cadence, update `POLL_INTERVAL_SEC` and restart the agent service."
         )
+
+    async def _handle_list_recent_alerts(self) -> str:
+        """Return alerts the autonomous loop has surfaced on Vigil's HAPI.
+
+        Vigil's autonomous monitoring loop ticks every ``POLL_INTERVAL_SEC``
+        against the seeded postop cohort on the agent's own HAPI server,
+        independent of whatever patient PO chat is scoped to. This skill
+        exposes the resulting review-queue contents so a clinician asking
+        "what has been flagged?" via PO chat can see the ward-wide picture
+        even if their current chat scope is a different patient.
+        """
+        import os
+
+        from backend.api.review_queue import list_pending_alerts
+
+        try:
+            interval_sec = int(os.environ.get("POLL_INTERVAL_SEC", "0"))
+        except ValueError:
+            interval_sec = 0
+
+        try:
+            alerts = list_pending_alerts()
+        except Exception:  # noqa: BLE001 — review queue is best-effort here
+            logger.exception("review queue read failed in list_recent_alerts")
+            return (
+                "I couldn't read the alert queue right now. The autonomous "
+                "monitoring loop's SQLite store is temporarily unavailable."
+            )
+
+        if interval_sec > 0:
+            cadence = (
+                f"Vigil's autonomous loop is watching every {interval_sec}s."
+            )
+        else:
+            cadence = (
+                "Vigil's autonomous loop is currently disabled "
+                "(`POLL_INTERVAL_SEC=0`); only on-demand skill calls run."
+            )
+
+        if not alerts:
+            return (
+                f"### Recent alerts — none pending\n"
+                f"{cadence} The watched cohort has no active alerts in the "
+                "review queue. All patients are within MEWT thresholds at "
+                "the most recent tick."
+            )
+
+        # Bucket by severity, surface critical first.
+        order = {"critical": 0, "urgent": 1, "routine": 2}
+        alerts_sorted = sorted(
+            alerts, key=lambda a: (order.get(a.get("severity", ""), 9),)
+        )
+        crit = [a for a in alerts_sorted if a.get("severity") == "critical"]
+        urg = [a for a in alerts_sorted if a.get("severity") == "urgent"]
+        rou = [a for a in alerts_sorted if a.get("severity") not in ("critical", "urgent")]
+
+        def _line(a: dict) -> str:
+            pid = a.get("patient_id", "?")
+            sev = a.get("severity", "?")
+            created = (a.get("created_at", "") or "")[:19].replace("T", " ")
+            note = (a.get("narrative", "") or "")
+            if len(note) > 140:
+                note = note[:137].rstrip() + "…"
+            return (
+                f"- **{pid}** *(severity: {sev}, raised {created} UTC)*\n"
+                f"  {note}"
+            )
+
+        sections = [
+            f"### Recent alerts — {len(alerts)} pending",
+            cadence,
+        ]
+        if crit:
+            sections.append("\n**CRITICAL — escalate now:**")
+            sections.extend(_line(a) for a in crit)
+        if urg:
+            sections.append("\n**URGENT:**")
+            sections.extend(_line(a) for a in urg)
+        if rou:
+            sections.append("\n**Routine review:**")
+            sections.extend(_line(a) for a in rou)
+        sections.append(
+            "\nThese alerts come from Vigil's autonomous monitoring of its "
+            "seeded postop cohort, not from the patient currently scoped in "
+            "PO chat. Use `screen vitals` / `score risk` for the chat-scoped "
+            "patient."
+        )
+        return "\n".join(sections)
 
     # ---------------------------------------------------------------
     # Internal helpers

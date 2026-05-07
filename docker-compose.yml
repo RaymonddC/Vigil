@@ -87,6 +87,30 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # One-shot — seeds HAPI with the 10 synthetic postop/postpartum patients
+  # (PT-001..PT-010) on every container start. The seed_hapi.py script uses
+  # PUT-by-id, so re-running is idempotent and re-anchors observation
+  # timestamps to "now" — keeping data inside the agent's 4–6h MCP lookback
+  # windows even after long uptime. Exits 0 on success; a2a/api wait for
+  # service_completed_successfully before starting their own monitoring.
+  # ---------------------------------------------------------------------------
+  seeder:
+    image: vigil-backend:latest
+    container_name: vigil-seeder
+    depends_on:
+      hapi:
+        condition: service_healthy
+      mcp:
+        # Force builder to materialise vigil-backend:latest before this
+        # service tries to pull it.
+        condition: service_started
+    environment:
+      FHIR_BASE_URL: http://hapi:8080/fhir
+    entrypoint: ["/app/.venv/bin/python"]
+    command: ["data/seed_hapi.py", "--fhir-base", "http://hapi:8080/fhir", "--src", "data/patients"]
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
   # Internal — A2A agent's private tool layer (the 4 clinical tools).
   # Under Option 3 the agent calls this over the docker bridge; the public
   # /mcp Caddy route is a Path-A holdover and not part of the submission.
@@ -161,7 +185,9 @@ services:
       # falls back to PT-007 demographics when FHIR is unreachable; without
       # it propagated here, only half the pipeline degrades gracefully.
       VIGIL_SYNTHETIC_FALLBACK: ${VIGIL_SYNTHETIC_FALLBACK:-false}
-      POLL_INTERVAL_SEC: "900"
+      # Default 5 min for the hackathon demo so judges see a tick during a
+      # 3-min video. Override to 900 (15 min) for production-realistic cadence.
+      POLL_INTERVAL_SEC: ${POLL_INTERVAL_SEC:-300}
       # Persist the SBAR review queue on a named volume so it survives
       # rebuilds and doesn't need a writable /app/backend/api/ directory.
       # Shared with the api service so agent-enqueued alerts are visible
@@ -174,6 +200,8 @@ services:
     depends_on:
       hapi:
         condition: service_healthy
+      seeder:
+        condition: service_completed_successfully
     expose:
       - "9000"
     restart: unless-stopped
