@@ -250,7 +250,6 @@ class PostopSentinelExecutor(AgentExecutor):
 
         breaches = data.get("breaches") or []
         scanned = data.get("scanned_count", 0)
-        status = data.get("status", "ok")
 
         # Render thresholds with natural-language operators ("below 90"
         # rather than "<90") — PO's markdown renderer can otherwise eat
