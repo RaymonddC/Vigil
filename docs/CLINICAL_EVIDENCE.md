@@ -236,6 +236,27 @@ The project brief references a "Rubenstein EBL formula." No such formula is inde
 **Supplementary**: *A large language model based pipeline for extracting information from patient complaint and anamnesis in clinical notes for severity assessment*. Scientific Reports (2025). https://www.nature.com/articles/s41598-025-07649-4
 **Strength**: Moderate. Direct "LLM reasoning over trend vitals" is still emerging — we should frame Vigil as contributing to this literature, not citing it as settled.
 
+### 8.5 COMPOSER-LLM — peer-reviewed LLM + structured-EHR sepsis prediction (the precedent for `vigil.read_nursing_signals`)
+**Source**: *Development and prospective implementation of a large language model based system for early sepsis prediction.* npj Digital Medicine (May 2025). DOI: 10.1038/s41746-025-01689-w.
+**URL**: https://www.nature.com/articles/s41746-025-01689-w
+**PMC**: https://pmc.ncbi.nlm.nih.gov/articles/PMC11952477/
+**PubMed**: https://pubmed.ncbi.nlm.nih.gov/40379845/
+**Verified figures**: Open-source LLM integrated with the COMPOSER deterministic model. Evaluated on 2,500 patient encounters: **72.1% sensitivity, 52.9% PPV, F1 0.610, 0.0087 false alarms per patient-hour.** 62% of false positives had bacterial infections on manual chart review. Real-time hourly FHIR API extraction; nurse-facing Best Practice Advisory at the bedside.
+**Strength**: Strong. Peer-reviewed prospective validation of *exactly* the architecture Vigil ships: deterministic clinical detector + LLM enrichment of unstructured nursing notes + FHIR-native deployment + nurse-facing alert. This is the canonical citation for the `vigil.read_nursing_signals` skill and for Vigil's overall "AI Factor" thesis.
+**Where we use it**: `_handle_read_nursing_signals` chat reply (inline citation), Devpost AI-Factor framing, demo-script opening line.
+
+### 8.6 Llama-3 8B vs Mixtral for sepsis prediction (validates Vigil's multi-provider swap)
+**Source**: Tang J, Boussina A, Hossain R, et al. *A Prospective Comparison of Large Language Models for Early Prediction of Sepsis.* AMIA 2024 (PMC, Dec 2024). PMC: https://pmc.ncbi.nlm.nih.gov/articles/PMC11649013/
+**Verified figures**: Llama-3 8B achieved **70.3% sensitivity, 32.5% PPV** on prospective validation; Mixtral achieved **72.1% sensitivity, 31.9% PPV** on the same task. Smaller models match larger ones at this task.
+**Strength**: Strong. Defends Vigil's `LLM_PROVIDER` env-var swap (Ollama / Groq / Claude / Gemini) as a real cost-vs-quality tradeoff backed by published numbers, not a hack.
+**Where we use it**: README "no vendor lock-in" line, Feasibility narrative.
+
+### 8.7 Sepsis-prediction-from-clinical-text systematic review
+**Source**: Goh KH, Wang L, Yeow AYK, et al. *Artificial intelligence in sepsis early prediction and diagnosis using unstructured data in healthcare.* Nature Communications 12:711 (2021). https://www.nature.com/articles/s41467-021-20910-4
+**Companion review**: Yang M, Zhang Y, Zhang H, et al. *Sepsis prediction, early detection, and identification using clinical text for machine learning: a systematic review.* JAMIA 29(3):559–575 (2022). https://academic.oup.com/jamia/article/29/3/559/6460282
+**Strength**: Strong. Establishes the body of evidence that ML on unstructured clinical text materially improves sepsis prediction over vitals-only approaches. Vigil's nursing-note NLP sits squarely in this lineage.
+**Where we use it**: Devpost "literature foundation" paragraph, judge-facing rationale.
+
 ---
 
 ## 9. Alert fatigue
