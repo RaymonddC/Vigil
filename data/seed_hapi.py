@@ -158,60 +158,70 @@ NOTES: dict[str, list[str]] = {
 PATIENTS: list[dict] = [
     {
         "id": "PT-001", "num": 1, "birth_date": "1978-03-14", "mrn": "MRN-100001",
+        "family": "Hopkins", "given": ["Sarah", "L"],
         "procedure_display": "Laparoscopic cholecystectomy",
         "procedure_snomed": "38628009", "gender": "female",
         "trajectory": "stable", "demo_role": "hero",
     },
     {
         "id": "PT-002", "num": 2, "birth_date": "1965-11-02", "mrn": "MRN-100002",
+        "family": "Brennan", "given": ["Robert", "J"],
         "procedure_display": "Total knee arthroplasty",
         "procedure_snomed": "57368009", "gender": "male",
         "trajectory": "stable", "demo_role": "filler",
     },
     {
         "id": "PT-003", "num": 3, "birth_date": "1991-07-22", "mrn": "MRN-100003",
+        "family": "Reyes", "given": ["Emily"],
         "procedure_display": "Appendicectomy",
         "procedure_snomed": "80146002", "gender": "female",
         "trajectory": "stable", "demo_role": "filler",
     },
     {
         "id": "PT-004", "num": 4, "birth_date": "1954-01-09", "mrn": "MRN-100004",
+        "family": "Donovan", "given": ["Frank", "M"],
         "procedure_display": "Open colectomy",
         "procedure_snomed": "44143004", "gender": "male",
         "trajectory": "deteriorating", "demo_role": "filler",
     },
     {
         "id": "PT-005", "num": 5, "birth_date": "1972-05-30", "mrn": "MRN-100005",
+        "family": "Mitchell", "given": ["Karen"],
         "procedure_display": "Total hip replacement",
         "procedure_snomed": "52734007", "gender": "female",
         "trajectory": "deteriorating", "demo_role": "filler",
     },
     {
         "id": "PT-006", "num": 6, "birth_date": "1960-09-17", "mrn": "MRN-100006",
+        "family": "Klein", "given": ["David", "A"],
         "procedure_display": "Coronary artery bypass graft",
         "procedure_snomed": "36197008", "gender": "male",
         "trajectory": "deteriorating", "demo_role": "filler",
     },
     {
         "id": "PT-007", "num": 7, "birth_date": "1983-12-04", "mrn": "MRN-100007",
+        "family": "Chen", "given": ["Margaret"],
         "procedure_display": "Exploratory laparotomy",
         "procedure_snomed": "47162000", "gender": "female",
         "trajectory": "deteriorating", "demo_role": "hero",
     },
     {
         "id": "PT-008", "num": 8, "birth_date": "1969-06-11", "mrn": "MRN-100008",
+        "family": "Russo", "given": ["Anthony"],
         "procedure_display": "Resection of intestine",
         "procedure_snomed": "44460008", "gender": "male",
         "trajectory": "sepsis", "demo_role": "filler",
     },
     {
         "id": "PT-009", "num": 9, "birth_date": "1994-02-28", "mrn": "MRN-100009",
+        "family": "Williams", "given": ["Linda"],
         "procedure_display": "Cesarean section",
         "procedure_snomed": "11466000", "gender": "female",
         "trajectory": "sepsis", "demo_role": "hero",
     },
     {
         "id": "PT-010", "num": 10, "birth_date": "1996-08-19", "mrn": "MRN-100010",
+        "family": "Patel", "given": ["Maya"],
         "procedure_display": "Normal delivery",
         "procedure_snomed": "3950001", "gender": "female",
         "trajectory": "pph", "demo_role": "hero",
@@ -400,14 +410,46 @@ def _ver_status(code: str = "confirmed") -> dict:
 
 
 def make_patient(pt: dict) -> dict:
+    """Build a FHIR R4 Patient with realistic names + Vigil demo-role extension.
+
+    The name fields come from the per-patient ``family`` and ``given`` keys
+    in PATIENTS so PO's picker shows clinically plausible names rather than
+    ``Synthetic Patient 7``. The trajectory + demo-role are surfaced as a
+    Vigil-namespaced Extension so the picker's detail panel (and any
+    Vigil-aware UI) can show ``Postop deterioration (hero)`` next to the
+    name — without polluting the FHIR Identifier / Name fields a real EHR
+    would index on.
+    """
+    family = pt.get("family", "Patient")
+    given = pt.get("given") or ["Synthetic", str(pt["num"])]
+    full_text = f"{' '.join(given)} {family}".strip()
+
     return {
         "resourceType": "Patient",
         "id": pt["id"],
         "identifier": [{"system": "http://vigil.local/mrn", "value": pt["mrn"]}],
-        "name": [{"family": "Patient", "given": ["Synthetic", str(pt["num"])],
-                  "text": f"Synthetic Patient {pt['num']}"}],
+        "name": [{
+            "use": "official",
+            "family": family,
+            "given": given,
+            "text": full_text,
+        }],
         "gender": pt["gender"],
         "birthDate": pt["birth_date"],
+        # Vigil-namespaced extension so PO's detail panel (and any
+        # Vigil-aware UI) can show the trajectory + demo role alongside
+        # the name. Out of band of FHIR core fields — won't interfere
+        # with US Core compliance.
+        "extension": [
+            {
+                "url": "http://vigil.local/fhir/StructureDefinition/demo-trajectory",
+                "valueString": pt["trajectory"],
+            },
+            {
+                "url": "http://vigil.local/fhir/StructureDefinition/demo-role",
+                "valueString": pt["demo_role"],
+            },
+        ],
     }
 
 
