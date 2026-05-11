@@ -113,16 +113,7 @@ class PostopSentinelExecutor(AgentExecutor):
             return
 
         sharp_headers = fhir_metadata_to_sharp_headers(fhir_dict)
-        patient_id = fhir_dict.get("patientId")
-        if not patient_id:
-            logger.warning("Missing patient_id in SHARP context")
-            await self._emit_completed(
-                event_queue, task_id, context_id,
-                "I couldn't run any check because no patient_id was "
-                "supplied in the FHIR context. Pick a patient in Prompt "
-                "Opinion before invoking this skill.",
-            )
-            return
+        patient_id = fhir_dict.get("patientId") or ""
 
         # --- Resolve skill ---
         skill = resolve_skill(context.message)
@@ -130,6 +121,31 @@ class PostopSentinelExecutor(AgentExecutor):
             "Dispatching A2A skill",
             extra={"skill": skill.value, "patient_id": patient_id},
         )
+
+        # Cohort-level skills operate on Vigil's own HAPI / SQLite review
+        # queue and don't need a PO-scoped patient. Patient-level skills
+        # do — and we'd rather fail loudly than read an empty patient_id.
+        # Keeping this list short and explicit so it can't drift quietly.
+        _COHORT_LEVEL_SKILLS = {
+            SkillId.TICK_NOW,
+            SkillId.LIST_RECENT_ALERTS,
+            SkillId.ESTIMATE_SAVINGS,
+            SkillId.FEEDBACK,
+        }
+        if skill not in _COHORT_LEVEL_SKILLS and not patient_id:
+            logger.warning(
+                "Missing patient_id for patient-scoped skill",
+                extra={"skill": skill.value},
+            )
+            await self._emit_completed(
+                event_queue, task_id, context_id,
+                f"I couldn't run `{skill.value}` because no patient was "
+                "selected in Prompt Opinion. Pick a patient in the data "
+                "scope picker and try again — or, if you want a ward-level "
+                "view, ask me to `tick now`, `show recent alerts`, "
+                "`estimate savings`, or record `feedback`.",
+            )
+            return
 
         # --- Dispatch ---
         # Each handler returns (chat_text, data_source). Skills that don't

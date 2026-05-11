@@ -543,7 +543,11 @@ class TestFriendlyFailures:
         task = _final_task(event_queue)
         assert task.status.state is TaskState.completed
         text = _final_text(event_queue)
-        assert "patient_id" in text.lower() or "patient id" in text.lower()
+        # Wording updated when cohort-level skills (tick_now / list_recent_alerts
+        # / estimate_savings / feedback) were exempted from the patient_id
+        # guard. Error text now nudges the clinician toward either picking
+        # a patient OR running a ward-level skill.
+        assert "no patient" in text.lower() or "pick a patient" in text.lower()
 
     @pytest.mark.asyncio
     async def test_missing_fhir_url_returns_friendly_completed(self) -> None:
