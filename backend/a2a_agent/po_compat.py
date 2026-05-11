@@ -109,6 +109,46 @@ def _rewrite_roles(node: Any) -> int:
     return rewritten
 
 
+def _strip_stale_task_ids(node: Any) -> int:
+    """Walk a parsed JSON tree and remove any ``taskId`` / ``task_id`` fields.
+
+    Why: Prompt Opinion's General Chat agent threads multiple skill
+    invocations onto the same A2A task id. Once Vigil emits
+    ``TaskState.completed`` for the first skill (which it does on every
+    reply — Option 3 chat is one-shot), the SDK's DefaultRequestHandler
+    correctly rejects any follow-on message addressed to the same task
+    with::
+
+        Task <uuid> is in terminal state: completed
+
+    Per A2A spec that's the right behaviour — a completed task is
+    immutable. But the only A2A client we target (PO) doesn't mint a
+    fresh task id per turn, so we get the rejection on every second
+    invocation.
+
+    Mitigation: strip every ``taskId`` reference from the inbound
+    payload before the SDK sees it. The handler then mints a new
+    task per request. Conversational continuation across tasks is
+    lost — PO's chat itself doesn't use it, so no functional regression
+    in the Option 3 surface. Logged for forensic clarity.
+
+    Returns the count of stripped task-id keys (for log breadcrumbs).
+    Operates in place — call on a deep-copied tree.
+    """
+    stripped = 0
+    if isinstance(node, dict):
+        for key in ("taskId", "task_id"):
+            if key in node:
+                node.pop(key, None)
+                stripped += 1
+        for value in list(node.values()):
+            stripped += _strip_stale_task_ids(value)
+    elif isinstance(node, list):
+        for item in node:
+            stripped += _strip_stale_task_ids(item)
+    return stripped
+
+
 def _rewrite_states_outbound(node: Any) -> int:
     """Walk a parsed JSON tree and rewrite TaskState values from spec
     form (``"completed"``) to gRPC-flavor (``"TASK_STATE_COMPLETED"``).
@@ -229,6 +269,19 @@ def normalise_po_payload(body: dict[str, Any]) -> dict[str, Any]:
         logger.info(
             "po_compat: rewrote role values",
             extra={"count": rewritten},
+        )
+
+    # Strip any taskId references from the inbound payload (PO's chat
+    # agent reuses task ids across turns; Vigil's per-reply
+    # TaskState.completed makes those references terminal and the SDK
+    # rejects with "Task <uuid> is in terminal state: completed"). See
+    # the _strip_stale_task_ids docstring for the full rationale.
+    stripped = _strip_stale_task_ids(new_body.get("params"))
+    if stripped:
+        logger.info(
+            "po_compat: stripped stale task id reference(s) — "
+            "fresh task will be minted",
+            extra={"count": stripped},
         )
 
     return new_body
