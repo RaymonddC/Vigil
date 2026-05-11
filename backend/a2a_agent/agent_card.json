@@ -139,6 +139,12 @@
       "name": "Paediatric early-warning screen (PEWS)",
       "description": "Age-banded paediatric early-warning screen for patients aged 0-17. Uses RCPCH PEWS / Monaghan 2005 thresholds tuned per age band (infant, toddler, school-age, adolescent) so the same vital signs that breach an adult MEWT threshold may be normal for a child — and vice versa. Returns per-parameter score (HR, RR, SpO2), aggregate, single-parameter red-flag boolean, and paediatric-specific action mapping with PICU escalation.",
       "tags": ["pediatric", "paediatric", "pews", "child", "rcpch", "monaghan", "age-banded"]
+    },
+    {
+      "id": "vigil.help",
+      "name": "List Vigil's capabilities",
+      "description": "Introspection skill — returns a grouped catalogue of all Vigil skills with one-line summaries plus the quickest demo path. Reads agent_card.json at request time so it stays in sync with the live skill catalogue automatically. Cohort-level: no scoped patient needed. Use as a chat-opener when first meeting Vigil ('what can you do?', 'list your skills', 'who are you').",
+      "tags": ["help", "capabilities", "introspection", "discovery"]
     }
   ],
   "securitySchemes": {

@@ -131,6 +131,7 @@ class PostopSentinelExecutor(AgentExecutor):
             SkillId.LIST_RECENT_ALERTS,
             SkillId.ESTIMATE_SAVINGS,
             SkillId.FEEDBACK,
+            SkillId.HELP,
         }
         if skill not in _COHORT_LEVEL_SKILLS and not patient_id:
             logger.warning(
@@ -143,7 +144,8 @@ class PostopSentinelExecutor(AgentExecutor):
                 "selected in Prompt Opinion. Pick a patient in the data "
                 "scope picker and try again — or, if you want a ward-level "
                 "view, ask me to `tick now`, `show recent alerts`, "
-                "`estimate savings`, or record `feedback`.",
+                "`estimate savings`, or record `feedback`. Type "
+                "`what can you do?` for a full catalogue.",
             )
             return
 
@@ -215,6 +217,8 @@ class PostopSentinelExecutor(AgentExecutor):
                 text, data_source = await self._handle_screen_pediatric(
                     sharp_headers, patient_id
                 )
+            elif skill is SkillId.HELP:
+                text = await self._handle_help()
             else:  # pragma: no cover — exhaustive enum dispatch
                 text = (
                     f"I don't recognise the skill `{skill}`. "
@@ -2548,6 +2552,88 @@ class PostopSentinelExecutor(AgentExecutor):
             "see CLINICAL_EVIDENCE §1.5 for the canonical 18% TREWS "
             "figure that drives the mortality term.*",
         ]
+        return "\n".join(sections) + _AUDIT_FOOTER_LIVE
+
+    async def _handle_help(self) -> str:
+        """Enumerate Vigil's available skills with one-line summaries.
+
+        Reads ``agent_card.json`` at request time so this stays in sync
+        with the live skill catalogue automatically — if a future commit
+        adds a skill, the help reply picks it up without a touch here.
+        Cohort-level skill: works without a scoped patient.
+        """
+        import json
+        from pathlib import Path
+
+        card_path = Path(__file__).resolve().parent / "agent_card.json"
+        try:
+            card = json.loads(card_path.read_text(encoding="utf-8"))
+            skills = card.get("skills") or []
+        except (OSError, ValueError):
+            logger.exception("help: failed to read agent_card.json")
+            skills = []
+
+        # Group skills by clinical role so the chat reply reads like a
+        # capability brochure rather than a flat dump.
+        groups: dict[str, list[tuple[str, str, str]]] = {
+            "Clinical screens": [],
+            "Composite + AI-only": [],
+            "Workflow + ops": [],
+        }
+        _GROUP_OF: dict[str, str] = {
+            "vigil.screen_vitals": "Clinical screens",
+            "vigil.score_risk": "Clinical screens",
+            "vigil.check_sepsis": "Clinical screens",
+            "vigil.score_news2": "Clinical screens",
+            "vigil.assess_postop_aki": "Clinical screens",
+            "vigil.assess_pph_severity": "Clinical screens",
+            "vigil.flag_treatment_conflicts": "Clinical screens",
+            "vigil.screen_pediatric": "Clinical screens",
+            "vigil.draft_sbar": "Composite + AI-only",
+            "vigil.read_nursing_signals": "Composite + AI-only",
+            "vigil.explain": "Composite + AI-only",
+            "vigil.forecast_trajectory": "Composite + AI-only",
+            "vigil.start_watching": "Workflow + ops",
+            "vigil.list_recent_alerts": "Workflow + ops",
+            "vigil.tick_now": "Workflow + ops",
+            "vigil.estimate_savings": "Workflow + ops",
+            "vigil.feedback": "Workflow + ops",
+            "vigil.help": "Workflow + ops",
+        }
+
+        for s in skills:
+            sid = s.get("id", "")
+            name = s.get("name", sid)
+            desc = (s.get("description", "") or "").split(".")[0].strip()
+            group = _GROUP_OF.get(sid, "Workflow + ops")
+            groups[group].append((sid, name, desc))
+
+        sections: list[str] = [
+            "### Vigil — what I can do",
+            "I'm a postop & postpartum sentinel agent. **Deterministic "
+            "rules first, LLM second** — I never decide escalation; the "
+            "clinician approves. Below are the skills available right "
+            "now. Just type the natural phrase and I'll route to the "
+            "right one.",
+        ]
+        for group_name, group_skills in groups.items():
+            if not group_skills:
+                continue
+            sections.append(f"\n**{group_name}**")
+            for sid, name, desc in group_skills:
+                sections.append(f"- **`{sid}`** — {name}. {desc}.")
+
+        sections.append(
+            "\n**Quickest demo path:** type `tick now` (no patient needed) "
+            "→ `show recent alerts` → scope a patient → `screen vitals` "
+            "→ `read the nursing notes` → `forecast trajectory` → "
+            "`draft an SBAR`."
+        )
+        sections.append(
+            "\n*Architecture: A2A agent on Prompt Opinion Marketplace, "
+            "FHIR R4 via SHARP context, HITL preserved (agent never "
+            "writes — only the proxy's clinician-approve flow does).*"
+        )
         return "\n".join(sections) + _AUDIT_FOOTER_LIVE
 
     async def _handle_screen_pediatric(

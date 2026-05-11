@@ -41,6 +41,7 @@ class SkillId(StrEnum):
     ESTIMATE_SAVINGS = "vigil.estimate_savings"
     FEEDBACK = "vigil.feedback"
     SCREEN_PEDIATRIC = "vigil.screen_pediatric"
+    HELP = "vigil.help"
 
 
 # Keyword map, ordered by specificity. First hit wins.
@@ -135,6 +136,22 @@ _KEYWORDS: list[tuple[tuple[str, ...], SkillId]] = [
          "this child", "this infant", "this toddler",
          "screen the child"),
         SkillId.SCREEN_PEDIATRIC,
+    ),
+    # Help / capabilities — cohort-level introspection. Catches the
+    # natural opening prompts a clinician (or judge) would use to
+    # discover Vigil's surface ("what can you do?", "list your skills").
+    # Must come BEFORE generic skill keywords so e.g. "help me check
+    # sepsis" still routes to CHECK_SEPSIS (the bare 'help' phrasings
+    # below require additional context words like 'can you do' or
+    # 'available').
+    (
+        ("what can you do", "what do you do", "what can vigil do",
+         "what does vigil do", "list your skills", "list skills",
+         "list capabilities", "your capabilities", "available skills",
+         "available capabilities", "show your skills", "show skills",
+         "help me understand what", "introduce yourself",
+         "who are you", "what are you"),
+        SkillId.HELP,
     ),
     (("sbar", "escalate", "handoff", "draft"), SkillId.DRAFT_SBAR),
     # Treatment-conflict skill — must come BEFORE the generic
