@@ -1904,6 +1904,16 @@ class PostopSentinelExecutor(AgentExecutor):
                 observations = await fhir.get_observations(
                     patient_id, category="vital-signs"
                 )
+                # Also pull DocumentReference resources. Some FHIR
+                # importers (notably PO's data-import pipeline) strip
+                # the inline Observation.note array, so the DocumentRef
+                # path is the more portable carrier of free-text notes.
+                # Falling open if the call fails — handler keeps working
+                # against whatever notes the Observation path returned.
+                try:
+                    doc_refs = await fhir.get_document_references(patient_id)
+                except FhirClientError:
+                    doc_refs = []
         except FhirClientError as exc:
             logger.warning(
                 "nursing-signals FHIR fetch failed",
@@ -1929,6 +1939,32 @@ class PostopSentinelExecutor(AgentExecutor):
                 seen.add(txt)
                 ts = obs.effectiveDateTime
                 note_entries.append((ts, txt))
+
+        # Merge in DocumentReference-carried notes. Each note's free text
+        # is base64-encoded in content[].attachment.data per FHIR R4;
+        # decode best-effort, skip ones we can't read.
+        import base64
+        from datetime import datetime as _dt
+        for doc in doc_refs:
+            doc_date = doc.get("date") or (doc.get("context") or {}).get("period", {}).get("start")
+            try:
+                ts = _dt.fromisoformat(str(doc_date).replace("Z", "+00:00")) if doc_date else None
+            except (TypeError, ValueError):
+                ts = None
+            for content in doc.get("content") or []:
+                att = content.get("attachment") or {}
+                data = att.get("data")
+                if not isinstance(data, str):
+                    continue
+                try:
+                    txt = base64.b64decode(data).decode("utf-8", "replace").strip()
+                except (ValueError, TypeError):
+                    continue
+                if not txt or txt in seen:
+                    continue
+                seen.add(txt)
+                note_entries.append((ts, txt))
+
         note_entries.sort(key=lambda p: p[0] or "")
 
         if not note_entries:

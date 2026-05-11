@@ -175,6 +175,36 @@ class FhirClient:
         entries = data.get("entry", [])
         return [Observation.model_validate(e["resource"]) for e in entries]
 
+    async def get_document_references(
+        self,
+        patient_id: str,
+        category: str | None = "clinical-note",
+        count: int = 50,
+    ) -> list[dict]:
+        """GET /DocumentReference?patient={id}&category=...
+
+        Returns the raw FHIR resource dicts rather than a typed model
+        because the only consumer (vigil.read_nursing_signals) just
+        needs the embedded text from content[].attachment.data. Adding
+        a Pydantic DocumentReference model for this single call would be
+        out-of-proportion.
+
+        ``category`` defaults to ``clinical-note`` per US Core
+        DocumentReference category vocabulary so nursing notes / progress
+        notes come through and structured documents (e.g. discharge
+        summaries) don't pollute the result.
+        """
+        params: dict[str, str] = {
+            "patient": patient_id,
+            "_sort": "-date",
+            "_count": str(count),
+        }
+        if category:
+            params["category"] = category
+        data = await self._get("DocumentReference", params=params)
+        entries = data.get("entry", [])
+        return [e.get("resource", {}) for e in entries]
+
     async def get_conditions(self, patient_id: str) -> list[Condition]:
         """GET /Condition?patient={id}."""
         data = await self._get("Condition", params={"patient": patient_id})

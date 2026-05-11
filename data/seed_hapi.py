@@ -502,6 +502,75 @@ def make_vital_obs(pt_id: str, tp: str, vital_key: str, value: float,
     return obs
 
 
+def make_nursing_note_doc(
+    pt_id: str, tp: str, idx: int, note_text: str
+) -> dict:
+    """Emit a FHIR DocumentReference carrying one nursing note.
+
+    Why a DocumentReference and not just Observation.note: some FHIR
+    importers (notably Prompt Opinion's data-import pipeline at the time
+    of writing) strip the inline ``Observation.note`` array on ingest.
+    Free-text clinical notes are conventionally carried as
+    DocumentReference resources in production EHRs anyway — this is the
+    more portable representation.
+
+    Type-coded LOINC 11506-3 ("Progress note") so a real ward EHR
+    surfaces it in the right tab. content[].attachment.data carries the
+    base64-encoded note text per FHIR R4.
+    """
+    import base64
+    encoded = base64.b64encode(note_text.encode("utf-8")).decode("ascii")
+    return {
+        "resourceType": "DocumentReference",
+        "id": f"DOC-{pt_id}-{tp}-NOTE-{idx}",
+        "status": "current",
+        "docStatus": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://loinc.org",
+                    "code": "11506-3",
+                    "display": "Subsequent evaluation note",
+                }
+            ],
+            "text": "Nursing progress note",
+        },
+        "category": [
+            {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/us/core/CodeSystem/us-core-documentreference-category",
+                        "code": "clinical-note",
+                        "display": "Clinical Note",
+                    }
+                ]
+            }
+        ],
+        "subject": {"reference": f"Patient/{pt_id}"},
+        "date": TP_TIMES[tp],
+        "author": [
+            {
+                "type": "PractitionerRole",
+                "display": "Ward nurse (synthetic, no PHI)",
+            }
+        ],
+        "content": [
+            {
+                "attachment": {
+                    "contentType": "text/plain",
+                    "data": encoded,
+                    "title": f"Nursing note T{tp}",
+                    "creation": TP_TIMES[tp],
+                }
+            }
+        ],
+        "context": {
+            "encounter": [{"reference": f"Encounter/ENC-{pt_id}"}],
+            "period": {"start": TP_TIMES[tp]},
+        },
+    }
+
+
 def make_lab_obs(pt_id: str, tp: str, lab_key: str, value: float) -> dict:
     loinc, display, ucum = LAB_LOINC[lab_key]
     return {
@@ -619,9 +688,15 @@ def build_patient_bundle(pt: dict) -> dict:
         for vk in vital_keys:
             if vk not in row:
                 continue
-            # Attach nursing note to Urine observation only
+            # Attach nursing note to Urine observation only — inline
+            # form, for FHIR servers that surface Observation.note.
             n = note if vk == "Urine" else None
             entries.append(_entry(make_vital_obs(pt_id, tp, vk, row[vk], n)))
+        # Also emit the nursing note as a standalone DocumentReference
+        # so importers that strip Observation.note (Prompt Opinion does)
+        # still expose the free text. Vigil's read_nursing_signals
+        # handler reads BOTH paths and dedupes.
+        entries.append(_entry(make_nursing_note_doc(pt_id, tp, i, note)))
 
     # Lab observations (T0, T4, T8 only)
     for j, tp in enumerate(LAB_TPS):
